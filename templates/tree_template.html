@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+        }}
+
+        #canvas {{
+            border: 1px solid #444;
+            background: #000;
+            cursor: grab;
+        }}
+
+        #canvas:active {{
+            cursor: grabbing;
+        }}
+
+        .controls {{
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }}
+
+        .control-group {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+
+        .controls input[type="range"] {{
+            width: 120px;
+        }}
+
+        button {{
+            padding: 8px 16px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+        }}
+
+        button:hover {{
+            background: #444;
+        }}
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <div class="control-group">
+            <label>Zoom:</label>
+            <input type="range" id="zoomSlider" min="0.1" max="3" step="0.1" value="1">
+            <span id="zoomValue">1.0</span>
+        </div>
+        <div class="control-group">
+            <label>Node Size:</label>
+            <input type="range" id="nodeSizeSlider" min="0.5" max="2" step="0.1" value="1">
+            <span id="nodeSizeValue">1.0</span>
+        </div>
+        <div class="control-group">
+            <label>Layout:</label>
+            <select id="layoutSelect">
+                <option value="radial">Radial</option>
+                <option value="tree">Tree</option>
+            </select>
+        </div>
+        <button id="resetView">Reset View</button>
+    </div>
+
+    <canvas id="canvas" width="1200" height="800"></canvas>
+
+    <script>
+        const treeData = {tree_data};
+
+        class ImprovedTreeVisualizer {{
+            constructor(canvas, treeData) {{
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.treeData = treeData;
+
+                this.viewState = {{
+                    offsetX: canvas.width / 2,
+                    offsetY: canvas.height / 2,
+                    zoom: 1,
+                    nodeScale: 1,
+                    layout: 'radial'
+                }};
+
+                this.nodes = [];
+                this.edges = [];
+                this.expandedNodes = new Set();
+                this.nodeDimensionsCache = new Map();
+
+                this.setupEventListeners();
+                this.processTree();
+                this.render();
+            }}
+
+            setupEventListeners() {{
+                let isDragging = false;
+                let lastX, lastY;
+                let dragStarted = false;
+
+                this.canvas.addEventListener('mousedown', (e) => {{
+                    isDragging = true;
+                    dragStarted = false;
+                    lastX = e.clientX;
+                    lastY = e.clientY;
+                }});
+
+                this.canvas.addEventListener('mousemove', (e) => {{
+                    if (isDragging) {{
+                        const deltaX = e.clientX - lastX;
+                        const deltaY = e.clientY - lastY;
+
+                        if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {{
+                            dragStarted = true;
+                        }}
+
+                        this.viewState.offsetX += deltaX;
+                        this.viewState.offsetY += deltaY;
+
+                        lastX = e.clientX;
+                        lastY = e.clientY;
+
+                        this.render();
+                    }}
+                }});
+
+                this.canvas.addEventListener('mouseup', (e) => {{
+                    if (isDragging && !dragStarted) {{
+                        this.handleClick(e);
+                    }}
+                    isDragging = false;
+                    dragStarted = false;
+                }});
+
+                this.canvas.addEventListener('wheel', (e) => {{
+                    e.preventDefault();
+
+                    const rect = this.canvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+
+                    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+                    const newZoom = Math.max(0.1, Math.min(3, this.viewState.zoom * zoomFactor));
+
+                    if (newZoom !== this.viewState.zoom) {{
+                        const zoomChange = newZoom / this.viewState.zoom;
+
+                        this.viewState.offsetX = mouseX - (mouseX - this.viewState.offsetX) * zoomChange;
+                        this.viewState.offsetY = mouseY - (mouseY - this.viewState.offsetY) * zoomChange;
+
+                        this.viewState.zoom = newZoom;
+
+                        this.nodeDimensionsCache.clear();
+
+                        document.getElementById('zoomSlider').value = this.viewState.zoom;
+                        document.getElementById('zoomValue').textContent = this.viewState.zoom.toFixed(1);
+
+                        this.render();
+                    }}
+                }});
+
+                document.getElementById('zoomSlider').addEventListener('input', (e) => {{
+                    this.viewState.zoom = parseFloat(e.target.value);
+                    document.getElementById('zoomValue').textContent = this.viewState.zoom.toFixed(1);
+                    this.nodeDimensionsCache.clear();
+                    this.render();
+                }});
+
+                document.getElementById('nodeSizeSlider').addEventListener('input', (e) => {{
+                    this.viewState.nodeScale = parseFloat(e.target.value);
+                    document.getElementById('nodeSizeValue').textContent = this.viewState.nodeScale.toFixed(1);
+                    this.nodeDimensionsCache.clear();
+                    this.processTree();
+                    this.render();
+                }});
+
+                document.getElementById('layoutSelect').addEventListener('change', (e) => {{
+                    this.viewState.layout = e.target.value;
+                    this.processTree();
+                    this.render();
+                }});
+
+                document.getElementById('resetView').addEventListener('click', () => {{
+                    this.viewState.offsetX = this.canvas.width / 2;
+                    this.viewState.offsetY = this.canvas.height / 2;
+                    this.viewState.zoom = 1;
+                    document.getElementById('zoomSlider').value = 1;
+                    document.getElementById('zoomValue').textContent = '1.0';
+                    this.nodeDimensionsCache.clear();
+                    this.render();
+                }});
+            }}
+
+            screenToWorld(screenX, screenY) {{
+                return {{
+                    x: (screenX - this.viewState.offsetX) / this.viewState.zoom,
+                    y: (screenY - this.viewState.offsetY) / this.viewState.zoom
+                }};
+            }}
+
+            worldToScreen(x, y) {{
+                return {{
+                    x: (x * this.viewState.zoom) + this.viewState.offsetX,
+                    y: (y * this.viewState.zoom) + this.viewState.offsetY
+                }};
+            }}
+
+            handleClick(e) {{
+                const rect = this.canvas.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+
+                for (const node of this.nodes) {{
+                    const screen = this.worldToScreen(node.x, node.y);
+                    const dimensions = this.getNodeDimensions(node);
+
+                    const left = screen.x - dimensions.width / 2;
+                    const right = screen.x + dimensions.width / 2;
+                    const top = screen.y - dimensions.height / 2;
+                    const bottom = screen.y + dimensions.height / 2;
+
+                    if (clickX >= left && clickX <= right && clickY >= top && clickY <= bottom) {{
+                        if (this.expandedNodes.has(node.id)) {{
+                            this.expandedNodes.delete(node.id);
+                        }} else {{
+                            this.expandedNodes.add(node.id);
+                        }}
+
+                        this.nodeDimensionsCache.clear();
+                        this.processTree();
+                        this.render();
+                        break;
+                    }}
+                }}
+            }}
+
+            processTree() {{
+                this.nodes = [];
+                this.edges = [];
+
+                if (this.viewState.layout === 'radial') {{
+                    this.layoutRadial();
+                }} else {{
+                    this.layoutTree();
+                }}
+            }}
+
+            layoutRadial() {{
+                this.traverseRadial(this.treeData, 0, 0, 0, null, 0);
+            }}
+
+            layoutTree() {{
+                this.traverseTree(this.treeData, 0, -200, null, 0);
+                this.balanceTreeLayout();
+            }}
+
+            traverseRadial(node, x, y, parentAngle, parentId, level) {{
+                const nodeId = this.nodes.length;
+
+                this.nodes.push({{
+                    id: nodeId,
+                    x: x,
+                    y: y,
+                    text: node.token_text,
+                    probability: node.probability,
+                    depth: node.depth,
+                    level: level,
+                    parentId: parentId
+                }});
+
+                if (parentId !== null) {{
+                    this.edges.push({{
+                        from: parentId,
+                        to: nodeId
+                    }});
+                }}
+
+                if (node.children && node.children.length > 0) {{
+                    const childCount = node.children.length;
+
+                    const baseRadius = 120 + (level * 60) + (childCount * 10);
+                    const radiusScale = this.viewState.nodeScale;
+                    const effectiveRadius = baseRadius * radiusScale;
+
+                    const maxAngleSpread = Math.PI * 1.6;
+                    const angleSpread = Math.min(maxAngleSpread, Math.max(0.6, childCount * 0.4));
+                    const startAngle = parentAngle - angleSpread / 2;
+
+                    node.children.forEach((child, index) => {{
+                        let childAngle;
+                        if (childCount === 1) {{
+                            childAngle = parentAngle;
+                        }} else {{
+                            childAngle = startAngle + (index * angleSpread / (childCount - 1));
+                        }}
+
+                        const childX = x + Math.cos(childAngle) * effectiveRadius;
+                        const childY = y + Math.sin(childAngle) * effectiveRadius;
+
+                        this.traverseRadial(child, childX, childY, childAngle, nodeId, level + 1);
+                    }});
+                }}
+            }}
+
+            traverseTree(node, x, y, parentId, level) {{
+                const nodeId = this.nodes.length;
+
+                this.nodes.push({{
+                    id: nodeId,
+                    x: x,
+                    y: y,
+                    text: node.token_text,
+                    probability: node.probability,
+                    depth: node.depth,
+                    level: level,
+                    parentId: parentId
+                }});
+
+                if (parentId !== null) {{
+                    this.edges.push({{
+                        from: parentId,
+                        to: nodeId
+                    }});
+                }}
+
+                if (node.children && node.children.length > 0) {{
+                    const baseSpacing = 160;
+                    const childSpacing = baseSpacing * this.viewState.nodeScale;
+                    const totalWidth = (node.children.length - 1) * childSpacing;
+                    const startX = x - totalWidth / 2;
+
+                    const verticalSpacing = 140 * this.viewState.nodeScale;
+
+                    node.children.forEach((child, index) => {{
+                        const childX = startX + (index * childSpacing);
+                        const childY = y + verticalSpacing;
+
+                        this.traverseTree(child, childX, childY, nodeId, level + 1);
+                    }});
+                }}
+            }}
+
+            balanceTreeLayout() {{
+                for (let iteration = 0; iteration < 8; iteration++) {{
+                    const forces = new Map();
+
+                    for (const node of this.nodes) {{
+                        forces.set(node.id, {{ x: 0, y: 0 }});
+                    }}
+
+                    for (let i = 0; i < this.nodes.length; i++) {{
+                        for (let j = i + 1; j < this.nodes.length; j++) {{
+                            const nodeA = this.nodes[i];
+                            const nodeB = this.nodes[j];
+
+                            const levelWeight = (nodeA.level === nodeB.level) ? 2.0 : 1.0;
+
+                            const dx = nodeB.x - nodeA.x;
+                            const dy = nodeB.y - nodeA.y;
+                            const distance = Math.sqrt(dx * dx + dy * dy);
+
+                            const minDistance = 120 * this.viewState.nodeScale * levelWeight;
+
+                            if (distance < minDistance && distance > 0.1) {{
+                                const repulsion = (minDistance - distance) / minDistance * 15 * levelWeight;
+                                const forceX = (dx / distance) * repulsion;
+                                const forceY = (dy / distance) * repulsion;
+
+                                forces.get(nodeA.id).x -= forceX;
+                                forces.get(nodeA.id).y -= forceY;
+                                forces.get(nodeB.id).x += forceX;
+                                forces.get(nodeB.id).y += forceY;
+                            }}
+                        }}
+                    }}
+
+                    const damping = 0.15;
+                    for (const node of this.nodes) {{
+                        const force = forces.get(node.id);
+                        if (node.level > 0) {{
+                            node.x += force.x * damping;
+                            node.y += force.y * damping;
+                        }}
+                    }}
+                }}
+            }}
+
+            getNodeDimensions(node) {{
+                const cacheKey = `${{node.id}}-${{this.viewState.zoom}}-${{this.viewState.nodeScale}}-${{this.expandedNodes.has(node.id)}}`;
+
+                if (this.nodeDimensionsCache.has(cacheKey)) {{
+                    return this.nodeDimensionsCache.get(cacheKey);
+                }}
+
+                const baseScale = this.viewState.nodeScale;
+                const zoomScale = Math.max(0.3, Math.min(1.2, this.viewState.zoom));
+                const fontSize = Math.max(10, 14 * baseScale * zoomScale);
+
+                this.ctx.font = `${{fontSize}}px Arial`;
+
+                const isExpanded = this.expandedNodes.has(node.id);
+                let displayText = node.text.trim();
+
+                let textWidth, textHeight, lines = [];
+
+                if (isExpanded) {{
+                    const words = displayText.split(/\s+/);
+                    const maxLineWidth = Math.max(200, 300 * baseScale);
+                    let currentLine = '';
+
+                    for (const word of words) {{
+                        const testLine = currentLine + (currentLine ? ' ' : '') + word;
+                        const testWidth = this.ctx.measureText(testLine).width;
+
+                        if (testWidth > maxLineWidth && currentLine) {{
+                            lines.push(currentLine);
+                            currentLine = word;
+                        }} else {{
+                            currentLine = testLine;
+                        }}
+                    }}
+                    if (currentLine) lines.push(currentLine);
+
+                    textWidth = Math.max(...lines.map(line => this.ctx.measureText(line).width));
+                    textHeight = lines.length * fontSize * 1.3;
+                }} else {{
+                    const charLimit = Math.floor(15 + (zoomScale * 25));
+                    if (displayText.length > charLimit) {{
+                        displayText = displayText.substring(0, charLimit) + '...';
+                    }}
+
+                    textWidth = this.ctx.measureText(displayText).width;
+                    textHeight = fontSize;
+                    lines = [displayText];
+                }}
+
+                const padding = Math.max(12, 16 * baseScale);
+                const width = Math.max(textWidth + padding * 2, 60 * baseScale);
+                const height = Math.max(textHeight + padding * 2, 40 * baseScale);
+
+                const dimensions = {{
+                    width,
+                    height,
+                    padding,
+                    fontSize,
+                    displayText,
+                    isExpanded,
+                    lines,
+                    textWidth,
+                    textHeight
+                }};
+
+                this.nodeDimensionsCache.set(cacheKey, dimensions);
+                return dimensions;
+            }}
+
+            render() {{
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                this.drawEdges();
+                this.drawNodes();
+            }}
+
+            drawEdges() {{
+                this.ctx.lineWidth = Math.max(1, 2 * this.viewState.zoom);
+
+                this.edges.forEach(edge => {{
+                    const fromNode = this.nodes[edge.from];
+                    const toNode = this.nodes[edge.to];
+
+                    const fromScreen = this.worldToScreen(fromNode.x, fromNode.y);
+                    const toScreen = this.worldToScreen(toNode.x, toNode.y);
+
+                    if (this.isOffScreen(fromScreen) && this.isOffScreen(toScreen)) {{
+                        return;
+                    }}
+
+                    const alpha = Math.max(0.3, toNode.probability);
+                    this.ctx.strokeStyle = `rgba(100, 100, 100, ${{alpha}})`;
+
+                    this.ctx.beginPath();
+
+                    if (this.viewState.layout === 'tree') {{
+                        const midY = fromScreen.y + (toScreen.y - fromScreen.y) * 0.6;
+
+                        this.ctx.moveTo(fromScreen.x, fromScreen.y);
+                        this.ctx.bezierCurveTo(
+                            fromScreen.x, midY,
+                            toScreen.x, midY,
+                            toScreen.x, toScreen.y
+                        );
+                    }} else {{
+                        this.ctx.moveTo(fromScreen.x, fromScreen.y);
+                        this.ctx.lineTo(toScreen.x, toScreen.y);
+                    }}
+
+                    this.ctx.stroke();
+                }});
+            }}
+
+            drawNodes() {{
+                const sortedNodes = [...this.nodes].sort((a, b) => a.level - b.level);
+
+                sortedNodes.forEach(node => {{
+                    const screen = this.worldToScreen(node.x, node.y);
+
+                    if (this.isOffScreen(screen)) {{
+                        return;
+                    }}
+
+                    this.drawNode(screen.x, screen.y, node);
+                }});
+            }}
+
+            isOffScreen(screen) {{
+                const margin = 150;
+                return (screen.x < -margin || screen.x > this.canvas.width + margin ||
+                        screen.y < -margin || screen.y > this.canvas.height + margin);
+            }}
+
+            drawRoundedRect(x, y, width, height, radius) {{
+                this.ctx.beginPath();
+                this.ctx.moveTo(x + radius, y);
+                this.ctx.lineTo(x + width - radius, y);
+                this.ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+                this.ctx.lineTo(x + width, y + height - radius);
+                this.ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                this.ctx.lineTo(x + radius, y + height);
+                this.ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+                this.ctx.lineTo(x, y + radius);
+                this.ctx.quadraticCurveTo(x, y, x + radius, y);
+                this.ctx.closePath();
+            }}
+
+            drawNode(x, y, node) {{
+                const dimensions = this.getNodeDimensions(node);
+                const {{ width, height, padding, fontSize, isExpanded, lines }} = dimensions;
+
+                const rectX = x - width / 2;
+                const rectY = y - height / 2;
+                const cornerRadius = Math.max(6, 10 * this.viewState.nodeScale);
+
+                const hue = (node.level * 45) % 360;
+                const saturation = Math.max(40, 70 - node.level * 5);
+                const lightness = Math.max(35, 55 - node.level * 3);
+                const color = `hsl(${{hue}}, ${{saturation}}%, ${{lightness}}%)`;
+
+                const borderColor = isExpanded ? '#ffffff' : '#cccccc';
+                const borderWidth = isExpanded ? 3 : Math.max(1, 2 * this.viewState.zoom);
+
+                this.drawRoundedRect(rectX, rectY, width, height, cornerRadius);
+                this.ctx.fillStyle = color;
+                this.ctx.fill();
+
+                this.ctx.strokeStyle = borderColor;
+                this.ctx.lineWidth = borderWidth;
+                this.ctx.stroke();
+
+                if (this.viewState.zoom > 0.2) {{
+                    this.ctx.fillStyle = '#ffffff';
+                    this.ctx.font = `${{fontSize}}px Arial`;
+                    this.ctx.textAlign = 'center';
+                    this.ctx.textBaseline = 'middle';
+
+                    if (lines.length > 1) {{
+                        this.drawMultilineText(lines, x, y, fontSize);
+                    }} else {{
+                        this.ctx.fillText(lines[0] || '', x, y);
+                    }}
+                }}
+
+                if (this.viewState.zoom > 0.4 && node.level > 0) {{
+                    this.ctx.fillStyle = '#aaaaaa';
+                    this.ctx.font = `${{Math.max(8, 11 * this.viewState.nodeScale)}}px Arial`;
+                    this.ctx.textAlign = 'center';
+                    this.ctx.fillText(
+                        node.probability.toFixed(2),
+                        x,
+                        y + height / 2 + 16 * this.viewState.nodeScale
+                    );
+                }}
+            }}
+
+            drawMultilineText(lines, centerX, centerY, fontSize) {{
+                const lineHeight = fontSize * 1.3;
+                const totalHeight = (lines.length - 1) * lineHeight;
+                const startY = centerY - totalHeight / 2;
+
+                lines.forEach((line, index) => {{
+                    this.ctx.fillText(line, centerX, startY + index * lineHeight);
+                }});
+            }}
+        }}
+
+        const canvas = document.getElementById('canvas');
+        const visualizer = new ImprovedTreeVisualizer(canvas, treeData);
+    </script>
+</body>
+</html>
