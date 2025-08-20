@@ -8,6 +8,8 @@ Most language model interfaces show you the single "best" continuation from any 
 
 This is based on the hypothesis that consumer-tuned models may still contain latent capabilities for multiple, semantically conflicting inference chains - even if those chains are buried under safety training or preference optimization. By sampling broadly and clustering semantically similar continuations, we can potentially surface these alternative reasoning paths.
 
+![Example Image](./images/example_img.png)
+
 ## Current State
 
 This is very much a work in progress. The basic pipeline functions and can:
@@ -45,7 +47,7 @@ Edit `config.ini` to adjust:
 - Generation parameters (temperature, top-k, top-p)
 - Clustering sensitivity (eps, minimum cluster size)
 - Visualization options
-TODO - more detail about config settings
+  TODO - more detail about config settings
 
 ## Architecture
 
