@@ -67,15 +67,14 @@ class DivergentGenerator:
                 if print_stems:
                     self._print_stems(stem_texts, branch_node, prompt)
 
-                # Check for semantic branching - only compute clustering once
-                has_branching, clustering_result = self.analyzer.analyze_semantic_branching(stem_texts)
+                # Compute clustering once and use results for both branching analysis and representatives
+                clustering_result = self.analyzer.cluster_stems(stem_texts)
 
-                if has_branching:
+                if clustering_result.has_branching:
                     # Found genuine semantic divergence - create branches
-                    labels, num_clusters = clustering_result
-                    representatives = self.analyzer.get_cluster_representatives(stem_tokens, stem_texts)
+                    representatives = self.analyzer.get_cluster_representatives(stem_tokens, clustering_result)
 
-                    print(f"Found {num_clusters} semantic clusters at depth {branch_node.depth}")
+                    print(f"Found {clustering_result.num_clusters} semantic clusters at depth {branch_node.depth}")
 
                     for rep_tokens in representatives:
                         # Create child node with representative stem
@@ -94,7 +93,7 @@ class DivergentGenerator:
                         total_nodes += 1
                 else:
                     # No semantic branching - continue with single representative
-                    representatives = self.analyzer.get_cluster_representatives(stem_tokens, stem_texts)
+                    representatives = self.analyzer.get_cluster_representatives(stem_tokens, clustering_result)
 
                     if representatives:
                         rep_tokens = representatives[0]

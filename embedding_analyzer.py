@@ -1,7 +1,14 @@
 import torch
 from sentence_transformers import SentenceTransformer
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, NamedTuple
 from config import get_config
+
+
+class ClusteringResult(NamedTuple):
+    """Encapsulates clustering analysis results."""
+    labels: List[int]
+    num_clusters: int
+    has_branching: bool
 
 
 class EmbeddingAnalyzer:
@@ -26,18 +33,18 @@ class EmbeddingAnalyzer:
         )
         return embeddings
 
-    def cluster_stems(self, stem_texts: List[str]) -> Tuple[List[int], int]:
+    def cluster_stems(self, stem_texts: List[str]) -> ClusteringResult:
         """
         Cluster stems by semantic similarity using embeddings.
         Results are cached to avoid redundant computation.
 
         Returns:
-            (cluster_labels, num_clusters)
+            ClusteringResult with labels, cluster count, and branching status
         """
         from sklearn.cluster import DBSCAN
 
         if not stem_texts:
-            return [], 0
+            return ClusteringResult([], 0, False)
 
         # Check cache first
         if (self._last_stem_texts is not None and
@@ -57,35 +64,26 @@ class EmbeddingAnalyzer:
         labels = clustering.fit_predict(embeddings_np)
 
         num_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-        result = (labels.tolist(), num_clusters)
+        min_clusters = self.config.getint("clustering", "min_clusters", 2)
+        has_branching = num_clusters >= min_clusters
+
+        result = ClusteringResult(labels.tolist(), num_clusters, has_branching)
 
         print(f"Found {num_clusters} clusters")
+
         # Cache the result
         self._last_stem_texts = stem_texts.copy()
         self._last_clustering_result = result
 
         return result
 
-    def analyze_semantic_branching(self, stem_texts: List[str]) -> Tuple[bool, Optional[Tuple[List[int], int]]]:
-        """
-        Check if stems show genuine semantic divergence and return clustering info.
-
-        Returns:
-            (has_branching, clustering_result)
-            Where clustering_result is (labels, num_clusters) if has_branching is True, else None
-        """
-        labels, num_clusters = self.cluster_stems(stem_texts)
-        min_clusters = self.config.getint("clustering", "min_clusters", 2)
-        has_branching = num_clusters >= min_clusters
-
-        return has_branching, (labels, num_clusters) if has_branching else None
-
-    def get_cluster_representatives(self, stem_tokens: List[torch.Tensor], stem_texts: List[str]) -> List[torch.Tensor]:
-        """Get representative stems for each cluster."""
+    def get_cluster_representatives(self, stem_tokens: List[torch.Tensor],
+                                   clustering_result: ClusteringResult) -> List[torch.Tensor]:
+        """Get representative stems for each cluster using precomputed clustering."""
         import numpy as np
         from sklearn.metrics.pairwise import cosine_distances
 
-        labels, _ = self.cluster_stems(stem_texts)
+        labels = clustering_result.labels
         unique_labels = set(label for label in labels if label != -1)
 
         if not unique_labels:
@@ -93,6 +91,10 @@ class EmbeddingAnalyzer:
             return [stem_tokens[0]] if stem_tokens else []
 
         representatives = []
+
+        # We need to recompute embeddings here since we don't cache them
+        # This is unavoidable for the distance calculation
+        stem_texts = [self.embedding_model.tokenizer.decode(tokens.tolist()) for tokens in stem_tokens]
         embeddings = self.get_embeddings(stem_texts).cpu().numpy()
 
         for cluster_id in unique_labels:
