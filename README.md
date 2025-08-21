@@ -24,6 +24,7 @@ This is very much a work in progress. The basic pipeline functions and can:
 - Clustering parameters need tuning for different domains.
 - Currently no quantitative metrics for "semantic divergence". Debatable as to whether or not sentence embeddings constitute a valid evaluation of meaning.
 - DBSCAN algorithm might be sub-optimal for quantifying embedding similarity.
+- Sampling/generation should be made deterministic (or seedable) for reproducable results and/or test cases.
 - Visualization is bare-bones and could use more features/polish
 - Data output is sparse at the moment. Could use JSON reports with more comprehensive stats.
 - Limited testing on different model types and prompt categories
