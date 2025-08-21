@@ -21,7 +21,7 @@ This is very much a work in progress. The basic pipeline functions and can:
 ## Limitations and TODOs
 
 - Only tested on GPT-2 models, which aren't really intelligent enough to function as an actual proof of concept. (larger models will need better memory management)
-- Clustering parameters need tuning for different domains. Dynamic adjustments to sample size based on mean embedding vector distance would probably be a good idea
+- Clustering parameters need tuning for different domains.
 - Currently no quantitative metrics for "semantic divergence"
 - Visualization is bare-bones and could use more features/polish
 - Data output is sparse at the moment. Could use JSON reports with more comprehensive stats.
