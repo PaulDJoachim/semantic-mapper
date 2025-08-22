@@ -1,4 +1,6 @@
 import torch
+import random
+import numpy as np
 from typing import List, Optional, Dict, Any
 from tree_utils import TreeNode, TreeOperations
 from model_interface import ModelInterface, GPT2Interface
@@ -17,6 +19,17 @@ class DivergentGenerator:
         self.visualizer = visualizer or TreeVisualizer()
         self.analyzer = EmbeddingAnalyzer()
         self.printer = TreePrinter()
+
+    def set_seed(self, seed: int) -> None:
+        """Set random seed for deterministic generation."""
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        # Ensure deterministic behavior
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     def _generate_stems_until_clustered(self, branch_sequence: torch.Tensor,
                                        initial_num_stems: int,
@@ -76,11 +89,21 @@ class DivergentGenerator:
                          top_k: int = None,
                          top_p: float = None,
                          max_stems_per_node: int = None,
-                         print_stems: bool = False) -> TreeNode:
+                         print_stems: bool = False,
+                         seed: int = None) -> TreeNode:
         """
         Explores semantic branching by periodically generating and clustering stems.
         Uses dynamic sampling to ensure reliable cluster detection.
         """
+        # Set seed for deterministic generation if provided
+        if seed is not None:
+            self.set_seed(seed)
+            print(f"Set random seed to {seed} for deterministic generation")
+        elif hasattr(self.config, 'getint') and self.config.getint("generation", "seed", None) is not None:
+            config_seed = self.config.getint("generation", "seed")
+            self.set_seed(config_seed)
+            print(f"Set random seed to {config_seed} from config for deterministic generation")
+
         max_depth = max_depth or self.config.max_depth
         stem_length = stem_length or self.config.getint("generation", "stem_length", 10)
         num_stems = num_stems or self.config.getint("generation", "num_stems", 50)
@@ -119,7 +142,7 @@ class DivergentGenerator:
                 # Final clustering analysis
                 clustering_result = self.analyzer.cluster_stems(stem_texts)
 
-                print(f"Node at depth {branch_node.depth}: {total_generated} stems → {clustering_result.num_clusters} clusters")
+                print(f"Node at depth {branch_node.depth}: {total_generated} stems -> {clustering_result.num_clusters} clusters")
 
                 if clustering_result.has_branching:
                     # Found genuine semantic divergence - create branches
