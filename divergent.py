@@ -3,8 +3,9 @@ import numpy as np
 from typing import List, Optional, Dict, Any, Tuple
 from tree_utils import TreeNode, TreeOperations
 from models.model_interface import ModelInterface
-from clustering.embedding_analyzer import EmbeddingAnalyzer
-from visualization import TreeVisualizer, TreePrinter
+from semantic_embedding.embedding_provider import EmbeddingProvider
+from clustering.cluster_analyzer import ClusterAnalyzer
+from visualization.visualization import TreeVisualizer, TreePrinter
 from config.config import get_config
 
 
@@ -12,12 +13,14 @@ class DivergentGenerator:
     """Generates text trees by exploring semantic branching points."""
 
     def __init__(self, model_interface: ModelInterface,
-                 analyzer: EmbeddingAnalyzer,
+                 embedding_provider: EmbeddingProvider,
+                 cluster_analyzer: ClusterAnalyzer,
                  visualizer: Optional[TreeVisualizer] = None,
                  printer: Optional[TreePrinter] = None):
         self.config = get_config()
         self.model = model_interface
-        self.analyzer = analyzer
+        self.embedding_provider = embedding_provider
+        self.cluster_analyzer = cluster_analyzer
         self.visualizer = visualizer or TreeVisualizer()
         self.printer = printer or TreePrinter()
 
@@ -71,10 +74,14 @@ class DivergentGenerator:
                 if print_stems:
                     self._print_stems(stem_texts, branch_node, prompt)
 
-                clustering_result = self.analyzer.cluster_stems(stem_texts)
+                # Generate embeddings and analyze clusters
+                embeddings = self.embedding_provider.get_embeddings(stem_texts)
+                clustering_result = self.cluster_analyzer.analyze_clusters(embeddings)
 
                 if clustering_result.has_branching:
-                    representatives = self.analyzer.get_cluster_representatives(stem_tokens, clustering_result)
+                    representatives = self.cluster_analyzer.get_cluster_representatives(
+                        stem_tokens, clustering_result, embeddings
+                    )
 
                     for rep_tokens in representatives:
                         child_text = self.model.decode(rep_tokens.tolist())
@@ -90,7 +97,9 @@ class DivergentGenerator:
                         new_branches.append((child, new_sequence))
                         total_nodes += 1
                 else:
-                    representatives = self.analyzer.get_cluster_representatives(stem_tokens, clustering_result)
+                    representatives = self.cluster_analyzer.get_cluster_representatives(
+                        stem_tokens, clustering_result, embeddings
+                    )
 
                     if representatives:
                         rep_tokens = representatives[0]
@@ -135,7 +144,9 @@ class DivergentGenerator:
             all_stem_texts.extend(batch_texts)
             total_generated += current_batch_size
 
-            clustering_result = self.analyzer.cluster_stems(all_stem_texts)
+            # Check if we have clusters with current batch
+            embeddings = self.embedding_provider.get_embeddings(all_stem_texts)
+            clustering_result = self.cluster_analyzer.analyze_clusters(embeddings)
 
             if clustering_result.num_clusters > 0:
                 break
