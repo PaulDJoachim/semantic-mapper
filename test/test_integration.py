@@ -74,7 +74,8 @@ class TestPipelineIntegration:
         assert Path(output_path).exists()
         content = Path(output_path).read_text()
         assert "<html" in content
-        assert "tree_data" in content
+        assert "const treeData" in content
+        assert "token_text" in content  # Verify JSON data is present
 
     def test_deterministic_generation(self):
         """Test that seeded generation is reproducible."""
