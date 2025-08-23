@@ -59,7 +59,7 @@ class EmbeddingAnalyzer:
         # Cluster using DBSCAN
         eps = self.config.getfloat("clustering", "eps", 0.5)
         min_sample_ratio = self.config.getfloat("clustering", "min_sample_ratio", 0.1)
-        min_samples = int(min_sample_ratio * self.config.getint("generation", "num_stems"))
+        min_samples = int(min_sample_ratio * len(stem_texts))
         clustering = DBSCAN(eps=eps, min_samples=min_samples, metric='cosine')
         labels = clustering.fit_predict(embeddings_np)
 
