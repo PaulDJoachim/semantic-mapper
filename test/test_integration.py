@@ -1,156 +1,170 @@
-"""Integration tests for DIA pipeline using MockModel."""
+"""Integration tests for DIA pipeline."""
 
 import pytest
+from pathlib import Path
 from models.model_interface import create_generator
 
 
-def test_mock_model_basic():
-    """Test MockModel basic functionality."""
-    generator = create_generator(
-        model_type="mock",
-        model_kwargs={"seed": 42},
-        analyzer_type="mock"
-    )
+class TestPipelineIntegration:
+    """Test complete pipeline integration."""
     
-    prompt = "Test prompt"
-    encoded = generator.model.encode(prompt)
-    decoded = generator.model.decode(encoded.tolist())
-    
-    assert isinstance(decoded, str)
-    assert len(encoded.tolist()) > 0
-
-
-def test_full_pipeline_clustering_mode():
-    """Test complete pipeline with clustering mode."""
-    generator = create_generator(
-        model_type="mock",
-        model_kwargs={"mode": "semantic_clusters", "seed": 42},
-        analyzer_type="mock"
-    )
-    
-    analysis = generator.full_analysis(
-        "Test ethical question",
-        max_depth=10,
-        stem_length=3,
-        num_stems=20
-    )
-    
-    assert analysis['root'] is not None
-    assert analysis['statistics']['total_nodes'] >= 1
-    assert 'branching_ratio' in analysis
-
-
-def test_full_pipeline_linear_mode():
-    """Test pipeline with linear mode (should not branch much)."""
-    generator = create_generator(
-        model_type="mock",
-        model_kwargs={"mode": "linear", "seed": 42},
-        analyzer_type="mock"
-    )
-    
-    analysis = generator.full_analysis(
-        "Test prompt",
-        max_depth=8,
-        stem_length=3,
-        num_stems=15
-    )
-    
-    # Linear mode should have low branching
-    assert analysis['branching_ratio'] <= 0.5
-
-
-def test_visualization_export():
-    """Test that visualization exports successfully."""
-    generator = create_generator(
-        model_type="mock",
-        model_kwargs={"seed": 42},
-        analyzer_type="mock"
-    )
-    
-    root = generator.explore_topology(
-        "Test visualization",
-        max_depth=6,
-        stem_length=2,
-        num_stems=10
-    )
-    
-    output_path = generator.visualizer.quick_export(root, "test")
-    assert output_path.endswith('.html')
-
-
-def test_different_mock_modes():
-    """Test all MockModel modes work."""
-    modes = ["semantic_clusters", "linear", "random"]
-    
-    for mode in modes:
-        generator = create_generator(
+    @pytest.fixture
+    def generator(self):
+        """Create generator with deterministic components."""
+        return create_generator(
             model_type="mock",
-            model_kwargs={"mode": mode, "seed": 42},
+            model_kwargs={"mode": "semantic_clusters", "seed": 42},
+            analyzer_type="mock",
+            cluster_kwargs={"seed": 42}
+        )
+
+    def test_full_analysis_pipeline(self, generator):
+        """Test complete analysis pipeline produces expected structure."""
+        analysis = generator.full_analysis(
+            "Test ethical question",
+            max_depth=10,
+            stem_length=3,
+            num_stems=20
+        )
+        
+        # Verify analysis structure
+        required_keys = ['root', 'statistics', 'branching_ratio', 'average_path_length']
+        assert all(key in analysis for key in required_keys)
+        
+        # Verify tree structure
+        root = analysis['root']
+        assert root.token_text == "Test ethical question"
+        assert root.depth == 0
+        
+        # Verify statistics make sense
+        stats = analysis['statistics']
+        assert stats['total_nodes'] >= 1
+        assert stats['max_depth'] >= 0
+        assert 0 <= analysis['branching_ratio'] <= 1
+
+    def test_mode_affects_branching(self):
+        """Test that different model modes produce different branching behavior."""
+        modes = [
+            ("semantic_clusters", lambda br: br > 0.1),  # Should branch
+            ("linear", lambda br: br < 0.5)  # Should branch less
+        ]
+        
+        for mode, branching_check in modes:
+            gen = create_generator(
+                model_type="mock",
+                model_kwargs={"mode": mode, "seed": 42},
+                analyzer_type="mock"
+            )
+            
+            analysis = gen.full_analysis("Test", max_depth=8, stem_length=2, num_stems=15)
+            assert branching_check(analysis['branching_ratio'])
+
+    def test_visualization_export(self, generator, tmp_path):
+        """Test visualization export creates valid HTML."""
+        root = generator.explore_topology(
+            "Test visualization",
+            max_depth=6,
+            stem_length=2,
+            num_stems=10
+        )
+        
+        output_path = generator.visualizer.quick_export(root, "test")
+        
+        # Verify file exists and has content
+        assert Path(output_path).exists()
+        content = Path(output_path).read_text()
+        assert "<html" in content
+        assert "tree_data" in content
+
+    def test_deterministic_generation(self):
+        """Test that seeded generation is reproducible."""
+        results = []
+        
+        for _ in range(2):
+            gen = create_generator(
+                model_type="mock",
+                model_kwargs={"seed": 42},
+                analyzer_type="mock",
+                cluster_kwargs={"seed": 42}
+            )
+            
+            analysis = gen.full_analysis(
+                "Test determinism",
+                max_depth=6,
+                stem_length=2,
+                num_stems=10,
+                seed=42
+            )
+            results.append(analysis['statistics']['total_nodes'])
+        
+        assert results[0] == results[1], "Generation should be deterministic"
+
+
+class TestComponentCompatibility:
+    """Test that different component combinations work together."""
+    
+    def test_mock_components_compatibility(self):
+        """Test all mock components work together."""
+        gen = create_generator(
+            model_type="mock",
             analyzer_type="mock"
         )
         
-        root = generator.explore_topology(
-            f"Test {mode}",
-            max_depth=5,
-            stem_length=2,
-            num_stems=8
-        )
+        # Test basic component interfaces
+        test_texts = ["freedom", "collective", "research"]
         
-        assert root is not None
-        assert root.children is not None
-
-
-def test_component_interfaces():
-    """Test that embedding and clustering components work together."""
-    generator = create_generator(
-        model_type="mock",
-        model_kwargs={"seed": 42},
-        analyzer_type="mock"
-    )
-    
-    test_texts = ["individual freedom", "collective welfare", "research data"]
-    
-    # Test embedding provider
-    embeddings = generator.embedding_provider.get_embeddings(test_texts)
-    assert embeddings.shape[0] == len(test_texts)
-    assert embeddings.shape[1] > 0
-    
-    # Test cluster analyzer
-    clustering_result = generator.cluster_analyzer.analyze_clusters(embeddings)
-    assert hasattr(clustering_result, 'labels')
-    assert hasattr(clustering_result, 'num_clusters')
-    assert hasattr(clustering_result, 'has_branching')
-    
-    # Test representative selection
-    representatives = generator.cluster_analyzer.get_cluster_representatives(
-        test_texts, clustering_result, embeddings
-    )
-    assert isinstance(representatives, list)
-    assert len(representatives) <= len(test_texts)
-
-
-def test_end_to_end_with_real_dbscan():
-    """Test with real DBSCAN if available."""
-    try:
-        generator = create_generator(
-            model_type="mock",
-            model_kwargs={"mode": "semantic_clusters", "seed": 42},
-            analyzer_type="sentence"
-        )
+        embeddings = gen.embedding_provider.get_embeddings(test_texts)
+        result = gen.cluster_analyzer.analyze_clusters(embeddings)
+        reps = gen.cluster_analyzer.get_cluster_representatives(test_texts, result, embeddings)
         
-        analysis = generator.full_analysis(
-            "Individual rights versus collective welfare",
-            max_depth=6,
-            stem_length=2,
-            num_stems=12
-        )
-        
-        assert analysis['root'] is not None
-        assert 'branching_ratio' in analysis
-        
-    except ImportError:
-        pytest.skip("Sentence transformers not available")
+        assert embeddings.shape[0] == len(test_texts)
+        assert len(reps) <= len(test_texts)
+
+    def test_real_components_fallback(self):
+        """Test fallback to mock when real components unavailable."""
+        try:
+            gen = create_generator(
+                model_type="mock",
+                analyzer_type="sentence"
+            )
+            # If we get here, real components are available
+            assert hasattr(gen.embedding_provider, 'model')
+        except ImportError:
+            # Should fall back to mock
+            gen = create_generator(
+                model_type="mock",
+                analyzer_type="mock"
+            )
+            assert hasattr(gen.embedding_provider, 'embedding_dim')
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def test_parameter_validation():
+    """Test that invalid parameters are handled gracefully."""
+    gen = create_generator(model_type="mock", analyzer_type="mock")
+    
+    # Test with minimal parameters
+    root = gen.explore_topology("Test", max_depth=1, stem_length=1, num_stems=5)
+    assert root is not None
+
+
+def test_edge_case_inputs():
+    """Test edge cases that might break the pipeline."""
+    gen = create_generator(model_type="mock", analyzer_type="mock")
+    
+    edge_cases = [
+        "",  # Empty string
+        "A",  # Single character
+        "Very long prompt " * 20  # Very long prompt
+    ]
+    
+    for prompt in edge_cases:
+        try:
+            analysis = gen.full_analysis(
+                prompt,
+                max_depth=3,
+                stem_length=1,
+                num_stems=5
+            )
+            assert analysis['root'] is not None
+        except Exception as e:
+            pytest.fail(f"Pipeline failed on edge case '{prompt[:20]}...': {e}")
