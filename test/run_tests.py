@@ -1,14 +1,16 @@
 """Manual testing script for development."""
 
-from models.model_interface import create_generator
-from clustering.embedding_analyzer import create_analyzer
+from clustering.embedding_analyzer import create_generator
 
 def test_basic_functionality():
     """Test basic MockModel functionality."""
     print("Testing basic functionality...")
 
-    analyzer = create_analyzer(analyzer_type='mock')
-    generator = create_generator(model_type="mock", seed=42, analyzer=analyzer)
+    generator = create_generator(
+        model_type="mock",
+        model_kwargs={"seed": 42},
+        analyzer_type="mock"
+    )
 
     prompt = "Test prompt"
     
@@ -27,16 +29,17 @@ def test_clustering_behavior():
     modes = [("semantic_clusters", "Should branch"), ("linear", "Should not branch")]
     
     for mode, expectation in modes:
-        analyzer = create_analyzer(analyzer_type='mock')
-        generator = create_generator(model_type="mock",
-                                     mode=mode,
-                                     seed=42,
-                                     analyzer=analyzer)
+        generator = create_generator(
+            model_type="mock",
+            model_kwargs={"mode": mode, "seed": 42},
+            analyzer_type="mock"
+        )
+        
         analysis = generator.full_analysis(
             "Test ethical question",
             max_depth=8,
             stem_length=3,
-            num_stems=20,
+            num_stems=20
         )
         
         print(f"  {mode}: {analysis['branching_ratio']:.2f} branching ratio ({expectation})")
@@ -46,17 +49,17 @@ def test_full_pipeline():
     """Test complete pipeline with visualization."""
     print("\nTesting full pipeline...")
     
-    analyzer = create_analyzer(analyzer_type='mock')
-    generator = create_generator(model_type="mock",
-                                 mode="semantic_clusters",
-                                 seed=42,
-                                 analyzer=analyzer)
+    generator = create_generator(
+        model_type="mock",
+        model_kwargs={"mode": "semantic_clusters", "seed": 42},
+        analyzer_type="mock"
+    )
 
     analysis = generator.full_analysis(
         "In the question of individual autonomy versus collective welfare",
         max_depth=12,
         stem_length=4,
-        num_stems=25,
+        num_stems=25
     )
     
     html_path = generator.visualizer.quick_export(analysis['root'], "test_prompt")
@@ -73,17 +76,19 @@ def test_deterministic_generation():
     
     results = []
     for i in range(2):
-        analyzer = create_analyzer(analyzer_type='mock')
-        generator = create_generator(model_type="mock",
-                                     seed=42,
-                                     analyzer=analyzer)
+        generator = create_generator(
+            model_type="mock",
+            model_kwargs={"seed": 42},
+            analyzer_type="mock",
+            analyzer_kwargs={"seed": 42}
+        )
 
         analysis = generator.full_analysis(
             "Test determinism",
             max_depth=6,
             stem_length=2,
             num_stems=10,
-            seed=42,
+            seed=42
         )
         results.append(analysis['statistics']['total_nodes'])
     

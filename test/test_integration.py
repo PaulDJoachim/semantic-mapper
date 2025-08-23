@@ -1,12 +1,16 @@
 """Integration tests for DIA pipeline using MockModel."""
 
 import pytest
-from models.model_interface import create_generator
+from clustering.embedding_analyzer import create_generator
 
 
 def test_mock_model_basic():
     """Test MockModel basic functionality."""
-    generator = create_generator(model_type="mock", seed=42)
+    generator = create_generator(
+        model_type="mock",
+        model_kwargs={"seed": 42},
+        analyzer_type="mock"
+    )
     
     prompt = "Test prompt"
     encoded = generator.model.encode(prompt)
@@ -19,9 +23,9 @@ def test_mock_model_basic():
 def test_full_pipeline_clustering_mode():
     """Test complete pipeline with clustering mode."""
     generator = create_generator(
-        model_type="mock", 
-        mode="semantic_clusters", 
-        seed=42
+        model_type="mock",
+        model_kwargs={"mode": "semantic_clusters", "seed": 42},
+        analyzer_type="mock"
     )
     
     analysis = generator.full_analysis(
@@ -39,9 +43,9 @@ def test_full_pipeline_clustering_mode():
 def test_full_pipeline_linear_mode():
     """Test pipeline with linear mode (should not branch much)."""
     generator = create_generator(
-        model_type="mock", 
-        mode="linear", 
-        seed=42
+        model_type="mock",
+        model_kwargs={"mode": "linear", "seed": 42},
+        analyzer_type="mock"
     )
     
     analysis = generator.full_analysis(
@@ -57,7 +61,11 @@ def test_full_pipeline_linear_mode():
 
 def test_visualization_export():
     """Test that visualization exports successfully."""
-    generator = create_generator(model_type="mock", seed=42)
+    generator = create_generator(
+        model_type="mock",
+        model_kwargs={"seed": 42},
+        analyzer_type="mock"
+    )
     
     root = generator.explore_topology(
         "Test visualization",
@@ -75,7 +83,11 @@ def test_different_mock_modes():
     modes = ["semantic_clusters", "linear", "random"]
     
     for mode in modes:
-        generator = create_generator(model_type="mock", mode=mode, seed=42)
+        generator = create_generator(
+            model_type="mock",
+            model_kwargs={"mode": mode, "seed": 42},
+            analyzer_type="mock"
+        )
         
         root = generator.explore_topology(
             f"Test {mode}",
