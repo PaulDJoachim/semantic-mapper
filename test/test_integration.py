@@ -1,7 +1,7 @@
 """Integration tests for DIA pipeline using MockModel."""
 
 import pytest
-from clustering.embedding_analyzer import create_generator
+from clustering.cluster_analyzer import create_generator
 
 
 def test_mock_model_basic():

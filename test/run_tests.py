@@ -1,6 +1,6 @@
 """Manual testing script for development."""
 
-from clustering.embedding_analyzer import create_generator
+from clustering.cluster_analyzer import create_generator
 
 def test_basic_functionality():
     """Test basic MockModel functionality."""
