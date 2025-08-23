@@ -1,6 +1,7 @@
 """Manual testing script for development."""
 
-from clustering.cluster_analyzer import create_generator
+from models.model_interface import create_generator
+
 
 def test_basic_functionality():
     """Test basic MockModel functionality."""
@@ -98,6 +99,32 @@ def test_deterministic_generation():
         print(f"  ✗ Non-deterministic: {results[0]} vs {results[1]} nodes")
 
 
+def test_component_integration():
+    """Test that embedding provider and cluster analyzer work together."""
+    print("\nTesting component integration...")
+    
+    generator = create_generator(
+        model_type="mock",
+        model_kwargs={"seed": 42},
+        analyzer_type="mock"
+    )
+    
+    # Test embeddings
+    test_texts = ["freedom matters", "collective welfare", "research shows"]
+    embeddings = generator.embedding_provider.get_embeddings(test_texts)
+    
+    # Test clustering
+    clustering_result = generator.cluster_analyzer.analyze_clusters(embeddings)
+    representatives = generator.cluster_analyzer.get_cluster_representatives(
+        test_texts, clustering_result, embeddings
+    )
+    
+    print(f"  Embeddings shape: {embeddings.shape}")
+    print(f"  Clusters: {clustering_result.num_clusters}")
+    print(f"  Representatives: {len(representatives)}")
+    print("  ✓ Component integration works")
+
+
 def main():
     """Run all manual tests."""
     print("Running DIA manual tests with MockModel")
@@ -108,6 +135,7 @@ def main():
         test_clustering_behavior()
         test_full_pipeline()
         test_deterministic_generation()
+        test_component_integration()
         
         print("\n" + "=" * 50)
         print("All tests completed successfully!")

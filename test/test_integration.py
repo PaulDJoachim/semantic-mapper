@@ -1,7 +1,7 @@
 """Integration tests for DIA pipeline using MockModel."""
 
 import pytest
-from clustering.cluster_analyzer import create_generator
+from models.model_interface import create_generator
 
 
 def test_mock_model_basic():
@@ -98,6 +98,58 @@ def test_different_mock_modes():
         
         assert root is not None
         assert root.children is not None
+
+
+def test_component_interfaces():
+    """Test that embedding and clustering components work together."""
+    generator = create_generator(
+        model_type="mock",
+        model_kwargs={"seed": 42},
+        analyzer_type="mock"
+    )
+    
+    test_texts = ["individual freedom", "collective welfare", "research data"]
+    
+    # Test embedding provider
+    embeddings = generator.embedding_provider.get_embeddings(test_texts)
+    assert embeddings.shape[0] == len(test_texts)
+    assert embeddings.shape[1] > 0
+    
+    # Test cluster analyzer
+    clustering_result = generator.cluster_analyzer.analyze_clusters(embeddings)
+    assert hasattr(clustering_result, 'labels')
+    assert hasattr(clustering_result, 'num_clusters')
+    assert hasattr(clustering_result, 'has_branching')
+    
+    # Test representative selection
+    representatives = generator.cluster_analyzer.get_cluster_representatives(
+        test_texts, clustering_result, embeddings
+    )
+    assert isinstance(representatives, list)
+    assert len(representatives) <= len(test_texts)
+
+
+def test_end_to_end_with_real_dbscan():
+    """Test with real DBSCAN if available."""
+    try:
+        generator = create_generator(
+            model_type="mock",
+            model_kwargs={"mode": "semantic_clusters", "seed": 42},
+            analyzer_type="sentence"
+        )
+        
+        analysis = generator.full_analysis(
+            "Individual rights versus collective welfare",
+            max_depth=6,
+            stem_length=2,
+            num_stems=12
+        )
+        
+        assert analysis['root'] is not None
+        assert 'branching_ratio' in analysis
+        
+    except ImportError:
+        pytest.skip("Sentence transformers not available")
 
 
 if __name__ == "__main__":

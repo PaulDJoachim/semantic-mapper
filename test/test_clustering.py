@@ -1,47 +1,32 @@
-#!/usr/bin/env python3
-"""Test the MockEmbeddingAnalyzer with real DBSCAN clustering."""
+"""Test clustering functionality"""
 
-import numpy as np
-from clustering.mock_clustering import MockEmbeddingAnalyzer
+from clustering.mock_clustering import MockClusterAnalyzer
+from semantic_embedding.mock_embedding import MockEmbeddingProvider
 
 
 def test_semantic_clustering():
     """Test that semantically similar texts cluster together."""
-    print("Testing semantic clustering with DBSCAN...")
+    print("Testing semantic clustering with mock components...")
     
-    analyzer = MockEmbeddingAnalyzer(eps=0.4, min_sample_ratio=0.2, seed=42)
+    embedding_provider = MockEmbeddingProvider(seed=42)
+    cluster_analyzer = MockClusterAnalyzer(mode="simple", seed=42)
     
-    # Create stems with clear semantic groups
     test_stems = [
-        # Individual rights cluster
         "individual freedom is paramount",
         "personal autonomy should be protected", 
-        "rights of the individual matter most",
-        "each person should choose freely",
-        
-        # Collective welfare cluster  
-        "society benefits when we work together",
-        "community needs come first",
-        "collective action is most effective",
-        "group welfare over individual wants",
-        
-        # Academic/research cluster
-        "research shows evidence for this approach",
-        "studies indicate the data supports",
-        "analysis of the evidence suggests",
-        
-        # Mixed/noise
-        "however we might consider both perspectives",
-        "the situation is complex and nuanced"
+        "collective welfare comes first",
+        "society needs unity",
+        "research shows evidence",
+        "data supports this view"
     ]
     
-    clustering_result = analyzer.cluster_stems(test_stems)
+    embeddings = embedding_provider.get_embeddings(test_stems)
+    clustering_result = cluster_analyzer.analyze_clusters(embeddings)
     
     print(f"Found {clustering_result.num_clusters} clusters")
     print(f"Branching detected: {clustering_result.has_branching}")
     print(f"Labels: {clustering_result.labels}")
     
-    # Group stems by cluster
     clusters = {}
     for i, label in enumerate(clustering_result.labels):
         if label not in clusters:
@@ -55,10 +40,49 @@ def test_semantic_clustering():
             print(f"  {stem}")
 
 
+def test_dbscan_clustering():
+    """Test with DBSCAN analyzer if available."""
+    try:
+        from clustering.dbscan_clustering import DBSCANClusterAnalyzer
+        from semantic_embedding.sentence_embedding import SentenceEmbeddingProvider
+        
+        print("\n" + "="*60)
+        print("Testing real DBSCAN clustering...")
+        
+        embedding_provider = SentenceEmbeddingProvider()
+        cluster_analyzer = DBSCANClusterAnalyzer(eps=0.35, min_sample_ratio=0.2, min_clusters=2)
+        
+        test_stems = [
+            "individual freedom matters most",
+            "personal autonomy is key", 
+            "collective welfare comes first",
+            "society needs unity",
+            "research shows evidence",
+            "data supports this view"
+        ]
+        
+        embeddings = embedding_provider.get_embeddings(test_stems)
+        clustering_result = cluster_analyzer.analyze_clusters(embeddings)
+        
+        print(f"DBSCAN found {clustering_result.num_clusters} clusters")
+        print(f"Branching: {clustering_result.has_branching}")
+        
+        representatives = cluster_analyzer.get_cluster_representatives(
+            test_stems, clustering_result, embeddings
+        )
+        
+        print(f"Representatives: {representatives}")
+        
+    except ImportError as e:
+        print(f"\nSkipping DBSCAN test: {e}")
+
+
 def test_parameter_sensitivity():
-    """Test how eps parameter affects clustering."""
+    """Test how different analyzers behave."""
     print("\n" + "="*60)
-    print("Testing parameter sensitivity...")
+    print("Testing analyzer modes...")
+    
+    embedding_provider = MockEmbeddingProvider(seed=42)
     
     test_stems = [
         "individual freedom matters",
@@ -69,89 +93,90 @@ def test_parameter_sensitivity():
         "data supports this view"
     ]
     
-    for eps in [0.2, 0.4, 0.6, 0.8]:
-        analyzer = MockEmbeddingAnalyzer(eps=eps, min_sample_ratio=0.15, seed=42)
-        result = analyzer.cluster_stems(test_stems)
-        noise_count = sum(1 for label in result.labels if label == -1)
+    embeddings = embedding_provider.get_embeddings(test_stems)
+    
+    for mode in ["simple", "alternating", "random", "no_clusters"]:
+        analyzer = MockClusterAnalyzer(mode=mode, seed=42)
+        result = analyzer.analyze_clusters(embeddings)
         
-        print(f"eps={eps}: {result.num_clusters} clusters, {noise_count} noise points")
+        representatives = analyzer.get_cluster_representatives(test_stems, result, embeddings)
+        
+        print(f"{mode}: {result.num_clusters} clusters, branching={result.has_branching}, "
+              f"{len(representatives)} representatives")
 
 
-def test_embedding_distances():
-    """Examine actual distances between mock embeddings."""
+def test_embedding_semantic_hints():
+    """Test that mock embeddings respond to semantic keywords."""
     print("\n" + "="*60)
-    print("Testing embedding distances...")
+    print("Testing embedding semantic hints...")
     
-    analyzer = MockEmbeddingAnalyzer(seed=42)
+    embedding_provider = MockEmbeddingProvider(seed=42)
     
-    # Test semantically similar and different texts
     texts = [
         "individual freedom is important",
         "personal autonomy matters most", 
         "collective welfare should guide us",
-        "society needs unity above all"
+        "society needs unity above all",
+        "this is completely random text",
+        "another unrelated statement here"
     ]
     
-    embeddings = [analyzer._text_to_embedding(text) for text in texts]
+    embeddings = embedding_provider.get_embeddings(texts)
     
-    from sklearn.metrics.pairwise import cosine_distances
-    distances = cosine_distances(embeddings)
+    # Check that similar semantic content produces similar embeddings
+    from sklearn.metrics.pairwise import cosine_similarity
     
-    print("Cosine distance matrix:")
-    print("Texts:")
+    similarities = cosine_similarity(embeddings)
+    
+    print("Cosine similarity matrix:")
     for i, text in enumerate(texts):
-        print(f"  {i}: {text}")
+        print(f"  {i}: {text[:30]}...")
     
-    print("\nDistances:")
+    print("\nSimilarities (showing high values > 0.5):")
     for i in range(len(texts)):
-        for j in range(len(texts)):
-            print(f"  {i}→{j}: {distances[i][j]:.3f}")
+        for j in range(i+1, len(texts)):
+            sim = similarities[i][j]
+            if sim > 0.5:
+                print(f"  {i}↔{j}: {sim:.3f}")
 
 
-def test_3d_visualization_data():
-    """Generate data for 3D visualization testing."""
-    print("\n" + "="*60) 
-    print("Generating 3D visualization data...")
+def test_integration_workflow():
+    """Test complete embedding → clustering → representatives workflow."""
+    print("\n" + "="*60)
+    print("Testing complete workflow...")
     
-    analyzer = MockEmbeddingAnalyzer(eps=0.35, seed=42)
+    embedding_provider = MockEmbeddingProvider(seed=42)
+    cluster_analyzer = MockClusterAnalyzer(mode="simple", seed=42)
     
-    # Generate a larger set of diverse stems
-    stems = []
+    stems = [
+        "freedom and individual rights",
+        "personal autonomy matters",
+        "collective society benefits", 
+        "community welfare first",
+        "research shows evidence",
+        "academic analysis suggests"
+    ]
     
-    # Individual freedom themes
-    for i in range(8):
-        stems.append(f"individual autonomy and personal freedom variation {i}")
+    # Step 1: Generate embeddings
+    embeddings = embedding_provider.get_embeddings(stems)
+    print(f"Generated {embeddings.shape[0]} embeddings of dimension {embeddings.shape[1]}")
     
-    # Collective welfare themes  
-    for i in range(8):
-        stems.append(f"collective society and community welfare version {i}")
-        
-    # Academic/research themes
-    for i in range(6):
-        stems.append(f"research evidence and academic analysis study {i}")
-        
-    # Add some noise
-    for i in range(4):
-        stems.append(f"random mixed content neither here nor there {i}")
+    # Step 2: Analyze clusters
+    clustering_result = cluster_analyzer.analyze_clusters(embeddings)
+    print(f"Clustering: {clustering_result.num_clusters} clusters, branching={clustering_result.has_branching}")
     
-    # Cluster the stems
-    clustering_result = analyzer.cluster_stems(stems)
-    embeddings = analyzer.get_embeddings_for_visualization(stems)
-    
-    print(f"Generated {len(stems)} stems")
-    print(f"Embedding shape: {embeddings.shape}")
-    print(f"Clusters found: {clustering_result.num_clusters}")
-    print(f"Noise points: {sum(1 for l in clustering_result.labels if l == -1)}")
-    
-    return stems, embeddings, clustering_result.labels
+    # Step 3: Get representatives
+    representatives = cluster_analyzer.get_cluster_representatives(stems, clustering_result, embeddings)
+    print(f"Selected {len(representatives)} representatives:")
+    for i, rep in enumerate(representatives):
+        print(f"  {i+1}: {rep}")
 
 
 if __name__ == "__main__":
     test_semantic_clustering()
+    test_dbscan_clustering() 
     test_parameter_sensitivity()
-    test_embedding_distances()
+    test_embedding_semantic_hints()
+    test_integration_workflow()
     
-    stems, embeddings, labels = test_3d_visualization_data()
-    print(f"\n✅ Mock DBSCAN working! Ready for 3D visualization with:")
-    print(f"   {len(stems)} samples, {embeddings.shape[1]}D embeddings")
-    print(f"   Clusters: {set(labels)}")
+    print(f"\n✅ Clustering tests completed! Components working correctly.")
