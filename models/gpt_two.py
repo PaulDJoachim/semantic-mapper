@@ -1,30 +1,8 @@
 import torch
 import torch.nn.functional as F
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, DynamicCache
-from typing import List, Tuple
-from abc import ABC, abstractmethod
-from config import get_config
-
-
-class ModelInterface(ABC):
-    """Abstract interface for language models used in divergent generation."""
-
-    @abstractmethod
-    def encode(self, text: str) -> torch.Tensor:
-        """Encode text to token IDs."""
-        pass
-
-    @abstractmethod
-    def decode(self, token_ids: List[int]) -> str:
-        """Decode token IDs back to text."""
-        pass
-
-    @abstractmethod
-    def generate_stems(self, input_ids: torch.Tensor, num_stems: int, stem_length: int,
-                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[Tuple[torch.Tensor, torch.Tensor]]:
-        """Generate multiple continuation stems and their hidden states."""
-        pass
-
+from model_interface import ModelInterface
+from config.config import get_config
 
 class GPT2Interface(ModelInterface):
     """Interface wrapper for GPT-2 models with batched inference optimization."""
