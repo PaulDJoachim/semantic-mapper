@@ -1,4 +1,4 @@
-from embedding_provider import EmbeddingProvider
+from semantic_embedding.embedding_provider import EmbeddingProvider
 from typing import List
 import numpy as np
 

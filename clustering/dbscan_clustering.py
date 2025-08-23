@@ -1,4 +1,4 @@
-from cluster_analyzer import ClusterAnalyzer, ClusteringResult
+from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
 import numpy as np
 from config.config import get_config
 from typing import List, Any
