@@ -3,6 +3,7 @@ import numpy as np
 from config.config import get_config
 from typing import List, Any
 
+
 class DBSCANClusterAnalyzer(ClusterAnalyzer):
     """DBSCAN-based clustering analyzer."""
 
@@ -16,50 +17,66 @@ class DBSCANClusterAnalyzer(ClusterAnalyzer):
 
     def analyze_clusters(self, embeddings: np.ndarray) -> ClusteringResult:
         """Cluster embeddings using DBSCAN."""
-        from sklearn.cluster import DBSCAN
-        from sklearn.metrics.pairwise import cosine_distances
-
         if len(embeddings) == 0:
-            return ClusteringResult([], 0, False)
+            return ClusteringResult([], 0, False, embeddings)
 
-        # Calculate minimum samples based on total stems generated
+        try:
+            from sklearn.cluster import DBSCAN
+        except ImportError:
+            return self._fallback_clustering(embeddings)
+
         config = get_config()
         total_stems = config.getint("generation", "num_stems", 50)
         min_samples = max(2, int(self.min_sample_ratio * total_stems))
 
-        # Use cosine distance for semantic similarity
         clustering = DBSCAN(eps=self.eps, min_samples=min_samples, metric='cosine')
         labels = clustering.fit_predict(embeddings)
 
         num_clusters = len(set(labels)) - (1 if -1 in labels else 0)
         has_branching = num_clusters >= self.min_clusters
 
-        return ClusteringResult(labels.tolist(), num_clusters, has_branching)
+        return ClusteringResult(
+            labels=labels.tolist(),
+            num_clusters=num_clusters,
+            has_branching=has_branching,
+            embeddings=embeddings
+        )
+
+    def _fallback_clustering(self, embeddings: np.ndarray) -> ClusteringResult:
+        """Fallback when sklearn unavailable."""
+        labels = [0] * len(embeddings)
+        return ClusteringResult(labels, 1, False, embeddings)
 
     def get_cluster_representatives(self, items: List[Any], clustering_result: ClusteringResult,
                                   embeddings: np.ndarray = None) -> List[Any]:
         """Get representative items using embedding distances."""
-        from sklearn.metrics.pairwise import cosine_distances
-
+        embeddings = embeddings or clustering_result.embeddings
         if embeddings is None:
-            raise ValueError("embeddings required for DBSCAN representative selection")
+            raise ValueError("embeddings required for representative selection")
 
         labels = clustering_result.labels
-        unique_labels = set(label for label in labels if label != -1)
+        unique_labels = [label for label in set(labels) if label != -1]
 
         if not unique_labels:
             return [items[0]] if items else []
 
         representatives = []
 
-        for cluster_id in unique_labels:
-            cluster_indices = [i for i, label in enumerate(labels) if label == cluster_id]
-            cluster_embeddings = embeddings[cluster_indices]
+        try:
+            from sklearn.metrics.pairwise import cosine_distances
+            
+            for cluster_id in unique_labels:
+                cluster_indices = [i for i, label in enumerate(labels) if label == cluster_id]
+                cluster_embeddings = embeddings[cluster_indices]
 
-            # Find centroid and closest item
-            centroid = np.mean(cluster_embeddings, axis=0)
-            distances = cosine_distances([centroid], cluster_embeddings)[0]
-            closest_idx = cluster_indices[np.argmin(distances)]
-            representatives.append(items[closest_idx])
+                centroid = np.mean(cluster_embeddings, axis=0)
+                distances = cosine_distances([centroid], cluster_embeddings)[0]
+                closest_idx = cluster_indices[np.argmin(distances)]
+                representatives.append(items[closest_idx])
+
+        except ImportError:
+            for cluster_id in unique_labels:
+                cluster_indices = [i for i, label in enumerate(labels) if label == cluster_id]
+                representatives.append(items[cluster_indices[0]])
 
         return representatives

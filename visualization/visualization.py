@@ -21,7 +21,7 @@ class TreeVisualizer:
 
     def _find_template(self) -> Path:
         """Locate template file in project structure."""
-        template_name = self.config.get("visualization", "template_path", "tree_template.html")
+        template_name = self.config.get("visualization", "template_path", "tree_template_old.html")
         
         # Start from this file's directory
         current = Path(__file__).parent

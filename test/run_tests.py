@@ -27,6 +27,45 @@ def test_basic_workflow():
     print(f"✓ Visualization: {html_path}")
 
 
+def test_3d_pipeline():
+    """Test 3D cluster data generation."""
+    print("\nTesting 3D cluster pipeline...")
+    
+    generator = create_generator(
+        model_type="mock",
+        model_kwargs={"mode": "semantic_clusters", "seed": 42},
+        analyzer_type="mock"
+    )
+    
+    root = generator.explore_topology(
+        "Test 3D clusters",
+        max_depth=6,
+        stem_length=2,
+        num_stems=12
+    )
+    
+    # Count nodes with cluster data
+    cluster_nodes = 0
+    sample_count = 0
+    
+    def count_clusters(node):
+        nonlocal cluster_nodes, sample_count
+        if node.cluster_data:
+            cluster_nodes += 1
+            sample_count += len(node.cluster_data.get('samples', []))
+    
+    from tree_utils import TreeOperations
+    TreeOperations.traverse_depth_first(root, count_clusters)
+    
+    print(f"✓ {cluster_nodes} nodes with cluster data")
+    print(f"✓ {sample_count} total 3D samples generated")
+    
+    if cluster_nodes > 0:
+        print("✓ 3D pipeline working")
+    else:
+        print("⚠ No cluster data generated")
+
+
 def test_mode_differences():
     """Verify different modes behave as expected."""
     print("\nTesting mode differences...")
@@ -48,6 +87,7 @@ def main():
     print("=" * 40)
     
     test_basic_workflow()
+    test_3d_pipeline() 
     test_mode_differences()
     
     print("\n" + "=" * 40)

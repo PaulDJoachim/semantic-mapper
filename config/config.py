@@ -82,7 +82,7 @@ class Config:
 
     @property
     def template_path(self) -> str:
-        return self.get("visualization", "template_path", "templates/tree_template.html")
+        return self.get("visualization", "template_path", "templates/tree_template_old.html")
 
     @property
     def compress_linear(self) -> bool:

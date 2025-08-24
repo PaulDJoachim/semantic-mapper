@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List, Any, NamedTuple
+from typing import List, Any, NamedTuple, Optional
 import numpy as np
-from config.config import get_config
 
 
 class ClusteringResult(NamedTuple):
@@ -9,6 +8,7 @@ class ClusteringResult(NamedTuple):
     labels: List[int]
     num_clusters: int
     has_branching: bool
+    embeddings: Optional[np.ndarray] = None
 
 
 class ClusterAnalyzer(ABC):
