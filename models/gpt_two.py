@@ -1,20 +1,22 @@
 import torch
 import torch.nn.functional as F
-from transformers import GPT2LMHeadModel, GPT2Tokenizer, DynamicCache
-from model_interface import ModelInterface
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from models.model_interface import ModelInterface
 from config.config import get_config
+from typing import List, Tuple, Any
+
 
 class GPT2Interface(ModelInterface):
     """Interface wrapper for GPT-2 models with batched inference optimization."""
 
-    def __init__(self, model_name: str = None, device: str = None):
+    def __init__(self, model_name: str, device: str = None):
         config = get_config()
 
         self.device = torch.device(
             device or config.device if torch.cuda.is_available() else "cpu"
         )
 
-        model_name = model_name or config.model_name
+        model_name = model_name
         self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
         self.model = GPT2LMHeadModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
@@ -24,9 +26,9 @@ class GPT2Interface(ModelInterface):
         if pad_token_mode == "eos":
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    def encode(self, text: str) -> torch.Tensor:
-        """Encode text to token tensor."""
-        return self.tokenizer.encode(text, return_tensors="pt").to(self.device)
+    def encode(self, text: str) -> List[int]:
+        """Encode text to list of token IDs."""
+        return self.tokenizer.encode(text)
 
     def decode(self, token_ids: List[int]) -> str:
         """Decode list of token IDs to text."""
@@ -66,42 +68,43 @@ class GPT2Interface(ModelInterface):
 
         return logits
 
-    def generate_stems(self, input_ids: torch.Tensor, num_stems: int, stem_length: int,
-                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+    def generate_stems(self, input_ids: List[int], num_stems: int, stem_length: int,
+                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[Tuple[List[int], torch.Tensor]]:
         """
-        Generate multiple continuation stems using batched inference with sampling controls.
+        Generate multiple continuation stems using batched inference.
 
         Args:
-            input_ids: Input token sequence
+            input_ids: List of input token IDs
             num_stems: Number of stems to generate
             stem_length: Length of each stem
-            temperature: Sampling temperature (0.1 = conservative, 2.0 = creative)
+            temperature: Sampling temperature
             top_k: Keep only top k tokens (0 = no filtering)
             top_p: Nucleus sampling threshold (1.0 = no filtering)
 
         Returns:
-            List of (generated_tokens, final_hidden_state) tuples
+            List of (generated_token_ids, final_hidden_state) tuples
         """
         config = get_config()
         batch_size = config.getint("generation", "batch_size", 50)
 
+        # Convert input list to tensor for model
+        input_tensor = torch.tensor([input_ids], device=self.device)
         stems = []
 
         with torch.no_grad():
-            # Process in batches to manage memory
             for batch_start in range(0, num_stems, batch_size):
                 batch_end = min(batch_start + batch_size, num_stems)
                 current_batch_size = batch_end - batch_start
 
-                # Create batch by repeating input_ids
-                batch_input = input_ids.repeat(current_batch_size, 1)
+                # Create batch by repeating input_tensor
+                batch_input = input_tensor.repeat(current_batch_size, 1)
 
                 # Generate stems for this batch
                 for step in range(stem_length):
                     outputs = self.model(batch_input, output_hidden_states=True)
-                    logits = outputs.logits[:, -1, :]  # [batch_size, vocab_size]
+                    logits = outputs.logits[:, -1, :]
 
-                    # Apply sampling filters to each item in the batch
+                    # Apply sampling filters
                     filtered_logits = []
                     for i in range(current_batch_size):
                         filtered = self.apply_sampling_filters(
@@ -111,14 +114,12 @@ class GPT2Interface(ModelInterface):
 
                     filtered_logits = torch.cat(filtered_logits, dim=0)
                     probs = torch.softmax(filtered_logits, dim=-1)
-
-                    # Sample independently for each item in batch
-                    next_tokens = torch.multinomial(probs, 1)  # [batch_size, 1]
+                    next_tokens = torch.multinomial(probs, 1)
                     batch_input = torch.cat([batch_input, next_tokens], dim=1)
 
-                # Extract generated portions and final hidden states
+                # Extract generated portions as lists and final hidden states
                 for i in range(current_batch_size):
-                    generated_tokens = batch_input[i, input_ids.size(1):]
+                    generated_tokens = batch_input[i, input_tensor.size(1):].tolist()
                     final_hidden = outputs.hidden_states[-1][i, -1, :]
                     stems.append((generated_tokens, final_hidden))
 

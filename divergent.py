@@ -5,7 +5,6 @@ from tree_utils import TreeNode, TreeOperations
 from models.model_interface import ModelInterface
 from semantic_embedding.embedding_provider import EmbeddingProvider
 from clustering.cluster_analyzer import ClusterAnalyzer
-from visualization.position_converter import EmbeddingTo3D
 from visualization.visualization import TreeVisualizer, TreePrinter
 from config.config import get_config
 
@@ -47,17 +46,18 @@ class DivergentGenerator:
             self.set_seed(seed)
 
         max_depth = max_depth or self.config.max_depth
-        stem_length = stem_length or self.config.getint("generation", "stem_length", 10)
-        num_stems = num_stems or self.config.getint("generation", "num_stems", 50)
-        temperature = temperature if temperature is not None else self.config.getfloat("generation", "temperature", 1.0)
-        top_k = top_k if top_k is not None else self.config.getint("generation", "top_k", 0)
-        top_p = top_p if top_p is not None else self.config.getfloat("generation", "top_p", 1.0)
-        max_stems_per_node = max_stems_per_node or self.config.getint("generation", "max_stems_per_node", 2000)
+        stem_length = stem_length or self.config.getint("generation", "stem_length")
+        num_stems = num_stems or self.config.getint("generation", "num_stems")
+        temperature = temperature if temperature is not None else self.config.getfloat("generation", "temperature")
+        top_k = top_k if top_k is not None else self.config.getint("generation", "top_k")
+        top_p = top_p if top_p is not None else self.config.getfloat("generation", "top_p")
+        max_stems_per_node = max_stems_per_node or self.config.getint("generation", "max_stems_per_node")
 
         input_ids = self.model.encode(prompt)
         root = TreeNode(token_id=-1, token_text=prompt, probability=1.0, depth=0)
 
         active_branches = [(root, input_ids)]
+        total_nodes = 1
 
         while active_branches and any(branch[0].depth < max_depth for branch in active_branches):
             new_branches = []
@@ -67,20 +67,17 @@ class DivergentGenerator:
                     new_branches.append((branch_node, branch_sequence))
                     continue
 
-                stem_tokens, stem_texts, _ = self._generate_stems_until_clustered(
+                # TODO make this return an object/NamedTuple
+                stem_tokens, stem_texts, total_generated = self._generate_stems_until_clustered(
                     branch_sequence, num_stems, stem_length, temperature, top_k, top_p, max_stems_per_node
                 )
 
                 if print_stems:
                     self._print_stems(stem_texts, branch_node, prompt)
 
+                # Generate embeddings and analyze clusters
                 embeddings = self.embedding_provider.get_embeddings(stem_texts)
                 clustering_result = self.cluster_analyzer.analyze_clusters(embeddings)
-
-                # Store cluster data for visualization
-                branch_node.cluster_data = EmbeddingTo3D.create_visualization_data(
-                    clustering_result, stem_texts
-                )
 
                 if clustering_result.has_branching:
                     representatives = self.cluster_analyzer.get_cluster_representatives(
@@ -88,7 +85,7 @@ class DivergentGenerator:
                     )
 
                     for rep_tokens in representatives:
-                        child_text = self.model.decode(rep_tokens.tolist())
+                        child_text = self.model.decode(rep_tokens)
                         child = TreeNode(
                             token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
                             token_text=child_text,
@@ -97,8 +94,9 @@ class DivergentGenerator:
                         )
                         branch_node.add_child(child)
 
-                        new_sequence = self._concatenate_sequences(branch_sequence, rep_tokens)
+                        new_sequence = branch_sequence + rep_tokens
                         new_branches.append((child, new_sequence))
+                        total_nodes += 1
                 else:
                     representatives = self.cluster_analyzer.get_cluster_representatives(
                         stem_tokens, clustering_result
@@ -106,7 +104,7 @@ class DivergentGenerator:
 
                     if representatives:
                         rep_tokens = representatives[0]
-                        child_text = self.model.decode(rep_tokens.tolist())
+                        child_text = self.model.decode(rep_tokens)
                         child = TreeNode(
                             token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
                             token_text=child_text,
@@ -115,8 +113,9 @@ class DivergentGenerator:
                         )
                         branch_node.add_child(child)
 
-                        new_sequence = self._concatenate_sequences(branch_sequence, rep_tokens)
+                        new_sequence = branch_sequence + rep_tokens
                         new_branches.append((child, new_sequence))
+                        total_nodes += 1
 
             active_branches = new_branches
 
@@ -140,12 +139,13 @@ class DivergentGenerator:
                                             temperature=temperature, top_k=top_k, top_p=top_p)
 
             batch_tokens = [stem[0] for stem in stems]
-            batch_texts = [self.model.decode(tokens.tolist()) for tokens in batch_tokens]
+            batch_texts = [self.model.decode(tokens) for tokens in batch_tokens]
 
             all_stem_tokens.extend(batch_tokens)
             all_stem_texts.extend(batch_texts)
             total_generated += current_batch_size
 
+            # Check if we have clusters with current batch
             embeddings = self.embedding_provider.get_embeddings(all_stem_texts)
             clustering_result = self.cluster_analyzer.analyze_clusters(embeddings)
 
@@ -158,17 +158,6 @@ class DivergentGenerator:
             current_batch_size = min(current_batch_size * 2, max_total_stems - total_generated)
 
         return all_stem_tokens, all_stem_texts, total_generated
-
-    def _concatenate_sequences(self, sequence1: Any, sequence2: Any) -> Any:
-        """Concatenate two sequences using model-specific logic."""
-        if hasattr(self.model, 'concatenate'):
-            return self.model.concatenate(sequence1, sequence2)
-        
-        if hasattr(sequence1, 'tolist') and hasattr(sequence2, 'tolist'):
-            combined = sequence1.tolist() + sequence2.tolist()
-            return type(sequence1)(combined)
-        
-        return sequence1
 
     def _print_stems(self, stem_texts: List[str], branch_node: TreeNode, original_prompt: str):
         """Print stems for inspection."""

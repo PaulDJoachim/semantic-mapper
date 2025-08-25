@@ -2,6 +2,7 @@ from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
 import numpy as np
 from config.config import get_config
 from typing import List, Any
+from sklearn.cluster import DBSCAN
 
 
 class DBSCANClusterAnalyzer(ClusterAnalyzer):
@@ -20,11 +21,6 @@ class DBSCANClusterAnalyzer(ClusterAnalyzer):
         if len(embeddings) == 0:
             return ClusteringResult([], 0, False, embeddings)
 
-        try:
-            from sklearn.cluster import DBSCAN
-        except ImportError:
-            return self._fallback_clustering(embeddings)
-
         config = get_config()
         total_stems = config.getint("generation", "num_stems", 50)
         min_samples = max(2, int(self.min_sample_ratio * total_stems))
@@ -42,15 +38,10 @@ class DBSCANClusterAnalyzer(ClusterAnalyzer):
             embeddings=embeddings
         )
 
-    def _fallback_clustering(self, embeddings: np.ndarray) -> ClusteringResult:
-        """Fallback when sklearn unavailable."""
-        labels = [0] * len(embeddings)
-        return ClusteringResult(labels, 1, False, embeddings)
-
-    def get_cluster_representatives(self, items: List[Any], clustering_result: ClusteringResult,
-                                  embeddings: np.ndarray = None) -> List[Any]:
+    def get_cluster_representatives(self, items: List[Any],
+                                    clustering_result: ClusteringResult) -> List[Any]:
         """Get representative items using embedding distances."""
-        embeddings = embeddings or clustering_result.embeddings
+        embeddings = clustering_result.embeddings
         if embeddings is None:
             raise ValueError("embeddings required for representative selection")
 

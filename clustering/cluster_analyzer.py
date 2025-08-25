@@ -8,7 +8,7 @@ class ClusteringResult(NamedTuple):
     labels: List[int]
     num_clusters: int
     has_branching: bool
-    embeddings: Optional[np.ndarray] = None
+    embeddings: np.ndarray
 
 
 class ClusterAnalyzer(ABC):
@@ -20,7 +20,6 @@ class ClusterAnalyzer(ABC):
         pass
 
     @abstractmethod
-    def get_cluster_representatives(self, items: List[Any], clustering_result: ClusteringResult,
-                                  embeddings: np.ndarray = None) -> List[Any]:
+    def get_cluster_representatives(self, items: List[Any], clustering_result: ClusteringResult) -> List[Any]:
         """Get representative items for each cluster."""
         pass

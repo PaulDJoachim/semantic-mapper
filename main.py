@@ -1,10 +1,18 @@
 from models.model_interface import create_generator
+from config.config import get_config
 
 
 def main():
-    """Production execution with real models."""
-    generator = create_generator(model_type="gpt2")
-    
+    config = get_config()
+    model_name = config.get('model', 'model_name', 'mock')
+    embedding_model = config.get('embeddings', 'model', 'mock')
+    cluster_type = config.get('clustering', 'cluster_type', 'mock')
+
+    generator = create_generator(model_name=model_name,
+                                 embedding_model=embedding_model,
+                                 cluster_type=cluster_type)
+
+    # TODO: move this into a JSON or something
     test_prompts = [
         "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is"
     ]

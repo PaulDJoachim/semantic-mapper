@@ -25,8 +25,7 @@ class MockClusterAnalyzer(ClusterAnalyzer):
         else:  # no_clusters
             return ClusteringResult([0] * len(embeddings), 1, False, embeddings)
 
-    def get_cluster_representatives(self, items: List[Any], clustering_result: ClusteringResult,
-                                  embeddings: np.ndarray = None) -> List[Any]:
+    def get_cluster_representatives(self, items: List[Any], clustering_result: ClusteringResult) -> List[Any]:
         """Select first item from each cluster."""
         if not items:
             return []

@@ -1,5 +1,5 @@
 import random
-from typing import List, Tuple
+from typing import List, Tuple, Any
 from models.model_interface import ModelInterface
 
 
@@ -147,7 +147,7 @@ class MockModel(ModelInterface):
             stems.append((MockTensor(tokens), hidden_state))
         
         return stems
-    
+
     def _generate_clustered_stem(self, stem_index: int, total_stems: int, stem_length: int) -> List[int]:
         """Generate stems designed to form clusters."""
         num_clusters = max(2, min(4, total_stems // 10))

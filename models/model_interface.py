@@ -7,65 +7,73 @@ class ModelInterface(ABC):
     """Abstract interface for language models used in divergent generation."""
 
     @abstractmethod
-    def encode(self, text: str) -> Any:
-        """Encode text to token representation."""
+    def encode(self, text: str) -> List[int]:
+        """Return list of token IDs"""
         pass
 
     @abstractmethod
     def decode(self, token_ids: List[int]) -> str:
-        """Decode token IDs back to text."""
+        """Decode list of token IDs to text"""
         pass
 
     @abstractmethod
     def generate_stems(self, input_ids: Any, num_stems: int, stem_length: int,
-                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[Tuple[Any, Any]]:
-        """Generate multiple continuation stems and their representations."""
+                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[Tuple[List[int], Any]]:
+        """Return stems as (token_list, hidden_state) pairs"""
         pass
 
 
-def create_model(model_type: str = None, **kwargs) -> ModelInterface:
+def get_model(model_name: str = None, **kwargs) -> ModelInterface:
     """Create model instance of specified type."""
-    config = get_config()
-    model_type = model_type or config.get("model", "type", "mock")
+    model_name = model_name
 
-    if model_type == "mock":
+    if model_name == "mock":
         from models.mock_model import MockModel
         return MockModel(**kwargs)
 
-    elif model_type == "gpt2":
-        from gpt_two import GPT2Interface
-        return GPT2Interface(**kwargs)
+    elif model_name == "gpt2-xl":
+        from models.gpt_two import GPT2Interface
+        return GPT2Interface(model_name, **kwargs)
 
     else:
-        raise ValueError(f"Unknown model type: {model_type}")
+        raise ValueError(f"Unknown model: {model_name}")
 
 
-def create_generator(model_type: str = None, **kwargs):
+def get_embedder(embedding_model: str = None, **kwargs):
+    """Create embedding model of specified type."""
+
+    if embedding_model == "mock":
+        from semantic_embedding.mock_embedding import MockEmbeddingProvider
+        embedding_provider = MockEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
+    elif embedding_model == "sentence":
+        from semantic_embedding.sentence_embedding import SentenceEmbeddingProvider
+        embedding_provider = SentenceEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
+    else:
+        raise ValueError(f"Unknown embedding model: {embedding_model}")
+
+    return embedding_provider
+
+
+def get_grouper(clustering_type: str = None, **kwargs):
+    if clustering_type == "mock":
+        from clustering.mock_clustering import MockClusterAnalyzer
+        cluster_analyzer = MockClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
+    elif clustering_type == "dbscan":
+        from clustering.dbscan_clustering import DBSCANClusterAnalyzer
+        cluster_analyzer = DBSCANClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
+    else:
+        raise ValueError(f"Unknown clustering type: {clustering_type}")
+
+    return cluster_analyzer
+
+
+def create_generator(model_name: str, embedding_model: str = None, cluster_type: str = None, **kwargs):
     """Create DivergentGenerator with specified components."""
     from divergent import DivergentGenerator
-    from semantic_embedding.mock_embedding import MockEmbeddingProvider
-    from semantic_embedding.sentence_embedding import SentenceEmbeddingProvider
-    from clustering.mock_clustering import MockClusterAnalyzer
-    from clustering.dbscan_clustering import DBSCANClusterAnalyzer
 
-    config = get_config()
-    analyzer_type = kwargs.pop('analyzer_type', None) or config.get("embeddings", "type", "sentence")
-
-    model = create_model(model_type, **kwargs.get('model_kwargs', {}))
-
-    if analyzer_type == "mock":
-        embedding_provider = MockEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
-        cluster_analyzer = MockClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
-    elif analyzer_type == "sentence":
-        try:
-            embedding_provider = SentenceEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
-            cluster_analyzer = DBSCANClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
-        except ImportError as e:
-            print(f"SentenceEmbedding not available: {e}, falling back to mock")
-            embedding_provider = MockEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
-            cluster_analyzer = MockClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
-    else:
-        raise ValueError(f"Unknown analyzer type: {analyzer_type}")
+    model = get_model(model_name, **kwargs.get('model_kwargs', {}))
+    embedding_provider = get_embedder(embedding_model, **kwargs.get('embedder_kwargs', {}))
+    cluster_analyzer = get_grouper(cluster_type, **kwargs.get('cluster_kwargs', {}))
 
     return DivergentGenerator(
         model_interface=model,
