@@ -1,5 +1,3 @@
-import random
-import numpy as np
 from typing import List, Optional, Dict, Any, Tuple
 from tree_utils import TreeNode, TreeOperations
 from models.model_interface import ModelInterface
@@ -8,7 +6,7 @@ from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
 from config.config import get_config
 from reporting.analysis_report import AnalysisReport
 from visualization.embedding_to_3d import EmbeddingTo3D
-from sklearn.decomposition import PCA
+import numpy as np
 
 
 class DivergentGenerator:
@@ -25,8 +23,26 @@ class DivergentGenerator:
 
     def set_seed(self, seed: int) -> None:
         """Set random seed for deterministic generation."""
+        import random
+
+        # Set Python and NumPy seeds
         random.seed(seed)
         np.random.seed(seed)
+
+        # Set PyTorch seeds
+        try:
+            import torch
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(seed)
+                torch.cuda.manual_seed_all(seed)
+                # Force deterministic CUDA operations
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+        except ImportError:
+            pass  # PyTorch not available
+
+        # Set model-specific seed if supported
         if hasattr(self.model, 'set_seed'):
             self.model.set_seed(seed)
 

@@ -26,6 +26,12 @@ class GPT2Interface(ModelInterface):
         if pad_token_mode == "eos":
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def set_seed(self, seed: int) -> None:
+        """Set model-specific random seed."""
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     def encode(self, text: str) -> List[int]:
         """Encode text to list of token IDs."""
         return self.tokenizer.encode(text)
