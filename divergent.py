@@ -1,85 +1,71 @@
-import torch
-import random
-import numpy as np
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from tree_utils import TreeNode, TreeOperations
-from model_interface import ModelInterface, GPT2Interface
-from embedding_analyzer import EmbeddingAnalyzer
-from visualization import TreeVisualizer, TreePrinter
-from config import get_config
+from models.model_interface import ModelInterface
+from semantic_embedding.embedding_provider import EmbeddingProvider
+from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
+from config.config import get_config
+from reporting.analysis_report import AnalysisReport
+from visualization.embedding_to_3d import EmbeddingTo3D
+import numpy as np
 
 
 class DivergentGenerator:
     """Generates text trees by exploring semantic branching points."""
 
-    def __init__(self, model_interface: Optional[ModelInterface] = None,
-                 visualizer: Optional[TreeVisualizer] = None):
+    def __init__(self, inference_model: ModelInterface,
+                 embedding_provider: EmbeddingProvider,
+                 cluster_analyzer: ClusterAnalyzer):
+
         self.config = get_config()
-        self.model = model_interface or GPT2Interface()
-        self.visualizer = visualizer or TreeVisualizer()
-        self.analyzer = EmbeddingAnalyzer()
-        self.printer = TreePrinter()
+        self.model = inference_model
+        self.embedding_provider = embedding_provider
+        self.cluster_analyzer = cluster_analyzer
 
     def set_seed(self, seed: int) -> None:
         """Set random seed for deterministic generation."""
+        import random
+
+        # Set Python and NumPy seeds
         random.seed(seed)
         np.random.seed(seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        # Ensure deterministic behavior
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
 
-    def _generate_stems_until_clustered(self, branch_sequence: torch.Tensor,
-                                       initial_num_stems: int,
-                                       stem_length: int,
-                                       temperature: float,
-                                       top_k: int,
-                                       top_p: float,
-                                       max_total_stems: int = 2000) -> tuple[List[torch.Tensor], List[str], int]:
-        """
-        Generate stems iteratively until clusters are found or max limit reached.
+        # Set PyTorch seeds
+        try:
+            import torch
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(seed)
+                torch.cuda.manual_seed_all(seed)
+                # Force deterministic CUDA operations
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+        except ImportError:
+            pass  # PyTorch not available
 
-        Returns:
-            tuple of (stem_tokens, stem_texts, total_stems_generated)
-        """
-        all_stem_tokens = []
-        all_stem_texts = []
-        current_batch_size = initial_num_stems
-        total_generated = 0
+        # Set model-specific seed if supported
+        if hasattr(self.model, 'set_seed'):
+            self.model.set_seed(seed)
 
-        while total_generated < max_total_stems:
-            # Generate current batch
-            stems = self.model.generate_stems(branch_sequence, current_batch_size, stem_length,
-                                            temperature=temperature, top_k=top_k, top_p=top_p)
+    def _create_child_branches(self, parent_node: TreeNode, branch_sequence: Any,
+                               representatives: List[Any], stem_length: int) -> List[Tuple[TreeNode, Any]]:
+        """Create child nodes and new branch sequences from cluster representatives."""
+        new_branches = []
 
-            # Extract tokens and texts
-            batch_tokens = [stem[0] for stem in stems]
-            batch_texts = [self.model.decode(tokens.tolist()) for tokens in batch_tokens]
+        # TODO replace with an actual probability distribution
+        probability = 1.0 / len(representatives) if len(representatives) > 1 else 1.0
 
-            # Add to accumulated results
-            all_stem_tokens.extend(batch_tokens)
-            all_stem_texts.extend(batch_texts)
-            total_generated += current_batch_size
+        for rep_tokens in representatives:
+            child_text = self.model.decode(rep_tokens)
+            child = TreeNode(
+                token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
+                token_text=child_text, probability=probability,
+                depth=parent_node.depth + stem_length)
+            parent_node.add_child(child)
 
-            # Check for clustering
-            clustering_result = self.analyzer.cluster_stems(all_stem_texts)
+            new_sequence = branch_sequence + rep_tokens
+            new_branches.append((child, new_sequence))
 
-            if clustering_result.num_clusters > 0:
-                # Found clusters, we're done
-                break
-
-            if total_generated >= max_total_stems:
-                # Hit maximum, stop here
-                print(f"Warning: Hit maximum stems ({max_total_stems}) without finding clusters")
-                break
-
-            # No clusters found, double the batch size for next iteration
-            current_batch_size = min(current_batch_size * 2, max_total_stems - total_generated)
-            print(f"No clusters found with {total_generated} stems, generating {current_batch_size} more...")
-
-        return all_stem_tokens, all_stem_texts, total_generated
+        return new_branches
 
     def explore_topology(self, prompt: str,
                          max_depth: int = None,
@@ -91,34 +77,21 @@ class DivergentGenerator:
                          max_stems_per_node: int = None,
                          print_stems: bool = False,
                          seed: int = None) -> TreeNode:
-        """
-        Explores semantic branching by periodically generating and clustering stems.
-        Uses dynamic sampling to ensure reliable cluster detection.
-        """
-        # Set seed for deterministic generation if provided
+        """Explores semantic branching by generating and clustering stems."""
         if seed is not None:
             self.set_seed(seed)
-            print(f"Set random seed to {seed} for deterministic generation")
-        elif hasattr(self.config, 'getint') and self.config.getint("generation", "seed", None) is not None:
-            config_seed = self.config.getint("generation", "seed")
-            self.set_seed(config_seed)
-            print(f"Set random seed to {config_seed} from config for deterministic generation")
 
         max_depth = max_depth or self.config.max_depth
-        stem_length = stem_length or self.config.getint("generation", "stem_length", 10)
-        num_stems = num_stems or self.config.getint("generation", "num_stems", 50)
-        temperature = temperature if temperature is not None else self.config.getfloat("generation", "temperature", 1.0)
-        top_k = top_k if top_k is not None else self.config.getint("generation", "top_k", 0)
-        top_p = top_p if top_p is not None else self.config.getfloat("generation", "top_p", 1.0)
-        max_stems_per_node = max_stems_per_node or self.config.getint("generation", "max_stems_per_node", 2000)
-
-        print(f"Generation settings: temp={temperature}, top_k={top_k}, top_p={top_p}")
-        print(f"Dynamic sampling: initial={num_stems}, max_per_node={max_stems_per_node}")
+        stem_length = stem_length or self.config.getint("generation", "stem_length")
+        num_stems = num_stems or self.config.getint("generation", "num_stems")
+        temperature = temperature if temperature is not None else self.config.getfloat("generation", "temperature")
+        top_k = top_k if top_k is not None else self.config.getint("generation", "top_k")
+        top_p = top_p if top_p is not None else self.config.getfloat("generation", "top_p")
+        max_stems_per_node = max_stems_per_node or self.config.getint("generation", "max_stems_per_node")
 
         input_ids = self.model.encode(prompt)
         root = TreeNode(token_id=-1, token_text=prompt, probability=1.0, depth=0)
 
-        # Initialize active branches with the root
         active_branches = [(root, input_ids)]
         total_nodes = 1
 
@@ -130,57 +103,35 @@ class DivergentGenerator:
                     new_branches.append((branch_node, branch_sequence))
                     continue
 
-                # Generate stems with dynamic sampling
-                stem_tokens, stem_texts, total_generated = self._generate_stems_until_clustered(
-                    branch_sequence, num_stems, stem_length, temperature, top_k, top_p, max_stems_per_node
-                )
+                stem_tokens, stem_texts, clustering_result, total_generated = (
+                    self._generate_stems_until_clustered(branch_sequence,
+                                                         num_stems,
+                                                         stem_length,
+                                                         temperature,
+                                                         top_k,
+                                                         top_p,
+                                                         max_stems_per_node))
 
-                # Print stems if requested
+
+
                 if print_stems:
                     self._print_stems(stem_texts, branch_node, prompt)
 
-                # Final clustering analysis
-                clustering_result = self.analyzer.cluster_stems(stem_texts)
-
                 print(f"Node at depth {branch_node.depth}: {total_generated} stems -> {clustering_result.num_clusters} clusters")
 
-                if clustering_result.has_branching:
-                    # Found genuine semantic divergence - create branches
-                    representatives = self.analyzer.get_cluster_representatives(stem_tokens, clustering_result)
+                viz_data = EmbeddingTo3D.create_visualization_data(clustering_result, stem_texts)
+                branch_node.cluster_data = viz_data
 
-                    for rep_tokens in representatives:
-                        # Create child node with representative stem
-                        child_text = self.model.decode(rep_tokens.tolist())
-                        child = TreeNode(
-                            token_id=rep_tokens[0].item(),
-                            token_text=child_text,
-                            probability=1.0 / len(representatives),
-                            depth=branch_node.depth + stem_length
-                        )
-                        branch_node.add_child(child)
+                representatives = self.cluster_analyzer.get_cluster_representatives(
+                    stem_tokens, clustering_result
+                )
 
-                        # Create new sequence for this branch
-                        new_sequence = torch.cat([branch_sequence, rep_tokens.unsqueeze(0)], dim=1)
-                        new_branches.append((child, new_sequence))
-                        total_nodes += 1
-                else:
-                    # No semantic branching - continue with single representative
-                    representatives = self.analyzer.get_cluster_representatives(stem_tokens, clustering_result)
-
-                    if representatives:
-                        rep_tokens = representatives[0]
-                        child_text = self.model.decode(rep_tokens.tolist())
-                        child = TreeNode(
-                            token_id=rep_tokens[0].item(),
-                            token_text=child_text,
-                            probability=1.0,
-                            depth=branch_node.depth + stem_length
-                        )
-                        branch_node.add_child(child)
-
-                        new_sequence = torch.cat([branch_sequence, rep_tokens.unsqueeze(0)], dim=1)
-                        new_branches.append((child, new_sequence))
-                        total_nodes += 1
+                if representatives:
+                    child_branches = self._create_child_branches(
+                        branch_node, branch_sequence, representatives, stem_length
+                    )
+                    new_branches.extend(child_branches)
+                    total_nodes += len(child_branches)
 
             active_branches = new_branches
 
@@ -189,46 +140,80 @@ class DivergentGenerator:
 
         return root
 
-    def _print_stems(self, stem_texts: List[str], branch_node: TreeNode, original_prompt: str):
-        """Print all stems for inspection."""
-        print(f"\n{'='*80}")
-        print(f"STEMS at depth {branch_node.depth}")
-        print(f"Context: {original_prompt}{branch_node.get_text_sequence()}")
-        print(f"{'='*80}")
+    def _generate_stems_until_clustered(self, branch_sequence: Any,
+                                        initial_num_stems: int,
+                                        stem_length: int,
+                                        temperature: float,
+                                        top_k: int,
+                                        top_p: float,
+                                        max_total_stems: int = 2000) -> Tuple[List[Any], List[str], ClusteringResult, int]:
+        """
+        Generate stems iteratively until clusters are found or max limit reached.
 
+        Returns:
+            tuple of (stem_tokens, stem_texts, total_stems_generated)
+        """
+        all_stem_tokens = []
+        all_stem_texts = []
+        all_stem_embeddings = None
+        current_batch_size = initial_num_stems
+        total_generated = 0
+
+        while total_generated < max_total_stems:
+            # Generate current batch
+            stems = self.model.generate_stems(branch_sequence, current_batch_size, stem_length,
+                                            temperature=temperature, top_k=top_k, top_p=top_p)
+
+            # Extract tokens, texts, and embeddings
+            batch_tokens = [stem[0] for stem in stems]
+            batch_texts = [self.model.decode(tokens) for tokens in batch_tokens]
+            batch_embeddings = self.embedding_provider.get_embeddings(batch_texts)
+
+            # Add to accumulated results
+            all_stem_tokens.extend(batch_tokens)
+            all_stem_texts.extend(batch_texts)
+
+            if all_stem_embeddings is None:
+                all_stem_embeddings = batch_embeddings
+            else:
+                all_stem_embeddings = np.concatenate(
+                    [all_stem_embeddings, batch_embeddings], axis=0)
+
+            total_generated += current_batch_size
+
+            clustering_result = self.cluster_analyzer.analyze_clusters(all_stem_embeddings)
+
+            if clustering_result.num_clusters > 0:
+                # Found clusters, we're done
+                break
+
+            if total_generated >= max_total_stems:
+                # Hit maximum, stop here
+                break
+
+            # No clusters found, double the batch size for next iteration
+            current_batch_size = min(current_batch_size * 2, max_total_stems - total_generated)
+            print(f"No clusters found with {total_generated} stems, generating {current_batch_size} more...")
+
+        return all_stem_tokens, all_stem_texts, clustering_result, total_generated
+
+    def _print_stems(self, stem_texts: List[str], branch_node: TreeNode, original_prompt: str):
+        """Print stems for inspection."""
         for i, stem_text in enumerate(stem_texts):
             print(f"{i+1:3d}: {repr(stem_text)}")
 
-        print(f"{'='*80}\n")
-
-    def analyze_tree(self, root: TreeNode) -> Dict[str, Any]:
-        """Analyze an existing tree and return detailed metrics."""
+    def full_analysis(self, prompt: str, **kwargs) -> AnalysisReport:
+        root = self.explore_topology(prompt, **kwargs)
         stats = TreeOperations.get_statistics(root)
-        min_path_depth = self.config.getint("analysis", "min_path_depth", 5)
-        paths = TreeOperations.get_all_paths(root, min_depth=min_path_depth)
+        paths = TreeOperations.get_all_paths(root, min_depth=5)
 
-        return {
-            'statistics': stats,
-            'sample_paths': paths[:self.config.getint("analysis", "sample_paths_count", 10)],
-            'branching_ratio': stats['branching_points'] / max(stats['total_nodes'], 1),
-            'average_path_length': sum(len(path) for path in paths) / max(len(paths), 1)
-        }
-
-    def generate_and_export(self, prompt: str, output_dir: str = None,
-                           **explore_kwargs) -> str:
-        """Generate tree and export visualization."""
-        output_dir = output_dir or self.config.output_dir
-
-        print(f"Exploring semantic topology for: '{prompt}'")
-        root = self.explore_topology(prompt, **explore_kwargs)
-
-        self.printer.print_statistics(root)
-        output_path = self.visualizer.quick_export(root, prompt, output_dir)
-        return output_path
-
-    def full_analysis(self, prompt: str, **explore_kwargs) -> Dict[str, Any]:
-        """Generate tree and return complete analysis including the tree itself."""
-        root = self.explore_topology(prompt, **explore_kwargs)
-        analysis = self.analyze_tree(root)
-        analysis['root'] = root
-        return analysis
+        return AnalysisReport(
+            root=root,
+            prompt=prompt,
+            generation_params=kwargs,
+            tree_statistics=stats,
+            sample_paths=paths[:10],
+            branching_ratio=stats['branching_points'] / max(stats['total_nodes'], 1),
+            average_path_length=sum(len(path) for path in paths) / max(len(paths), 1),
+            model_info=self.model.get_mode_info() if hasattr(self.model, 'get_mode_info') else str(type(self.model))
+        )

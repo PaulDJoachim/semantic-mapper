@@ -5,19 +5,20 @@ import json
 
 @dataclass
 class TreeNode:
-    """Represents a single point in the generation tree."""
+    """Represents a single point in the generation tree with cluster visualization data."""
     token_id: int
     token_text: str
     probability: float
     depth: int
     parent: Optional['TreeNode'] = None
     children: List['TreeNode'] = field(default_factory=list)
+    cluster_data: Optional[Dict[str, Any]] = None
 
     def get_sequence(self) -> List[int]:
         """Returns the token sequence from root to this node."""
         sequence = []
         node = self
-        while node and node.parent:  # Exclude root
+        while node and node.parent:
             sequence.append(node.token_id)
             node = node.parent
         return list(reversed(sequence))
@@ -26,7 +27,7 @@ class TreeNode:
         """Returns the text sequence from root to this node."""
         text_parts = []
         node = self
-        while node and node.parent:  # Exclude root
+        while node and node.parent:
             text_parts.append(node.token_text)
             node = node.parent
         return ''.join(reversed(text_parts))
@@ -63,7 +64,7 @@ class TreeOperations:
         paths = []
 
         def traverse(node: TreeNode, current_path: str):
-            if node.parent:  # Not root
+            if node.parent:
                 current_path += node.token_text
 
             if node.is_leaf():
@@ -79,12 +80,21 @@ class TreeOperations:
     @staticmethod
     def get_statistics(root: TreeNode) -> Dict[str, Any]:
         """Gather statistics about the generated tree."""
-        stats = {"total_nodes": 0, "max_depth": 0, "leaf_nodes": 0, "branching_points": 0,
-            "unique_paths": 0}
+        stats = {
+            "total_nodes": 0, 
+            "max_depth": 0, 
+            "leaf_nodes": 0, 
+            "branching_points": 0,
+            "unique_paths": 0,
+            "nodes_with_clusters": 0
+        }
 
         def count_node(node: TreeNode):
             stats["total_nodes"] += 1
             stats["max_depth"] = max(stats["max_depth"], node.depth)
+            
+            if node.cluster_data:
+                stats["nodes_with_clusters"] += 1
 
             if node.is_leaf():
                 stats["leaf_nodes"] += 1
@@ -93,7 +103,6 @@ class TreeOperations:
 
         TreeOperations.traverse_depth_first(root, count_node)
         stats["unique_paths"] = len(TreeOperations.get_all_paths(root))
-
         return stats
 
     @staticmethod
@@ -103,52 +112,32 @@ class TreeOperations:
         if max_depth and node.depth > max_depth:
             return
 
-        if node.parent:  # Skip root
+        if node.parent:
             connector = "└── " if is_last else "├── "
-            print(
-                f"{prefix}{connector}{repr(node.token_text)} (p={node.probability:.3f}, d={node.depth})")
+            cluster_info = ""
+            if node.cluster_data:
+                cluster_info = f" [{node.cluster_data['num_clusters']} clusters]"
+            print(f"{prefix}{connector}{repr(node.token_text)} (p={node.probability:.3f}, d={node.depth}){cluster_info}")
             prefix += "    " if is_last else "│   "
 
         for i, child in enumerate(node.children):
-            TreeOperations.print_tree(child, prefix, i == len(node.children) - 1,
-                                      max_depth)
+            TreeOperations.print_tree(child, prefix, i == len(node.children) - 1, max_depth)
 
     @staticmethod
     def to_dict(node: TreeNode, compress_linear: bool = True) -> Dict[str, Any]:
-        """Convert TreeNode to dictionary, optionally grouping linear sequences."""
-        if compress_linear and TreeOperations._is_linear_sequence_start(node):
-            # Accumulate text until we hit a branching point
-            accumulated_text = node.token_text
-            current = node
-
-            while (
-                    len(current.children) == 1 and TreeOperations._is_middle_of_linear_sequence(
-                current.children[0])):
-                current = current.children[0]
-                accumulated_text += current.token_text
-
-            # Return the accumulated node with the final child's branching structure
-            return {"token_id": node.token_id, "token_text": accumulated_text,
-                "probability": node.probability, "depth": node.depth,
-                "children": [TreeOperations.to_dict(child, compress_linear) for child in
-                             current.children]}
-        else:
-            # This is a branching point or compression is disabled, process normally
-            return {"token_id": node.token_id, "token_text": node.token_text,
-                "probability": node.probability, "depth": node.depth,
-                "children": [TreeOperations.to_dict(child, compress_linear) for child in
-                             node.children]}
-
-    @staticmethod
-    def _is_linear_sequence_start(node: TreeNode) -> bool:
-        """Check if node starts a linear sequence (not root, has exactly one child)."""
-        return node.parent is not None and len(node.children) == 1
-
-    @staticmethod
-    def _is_middle_of_linear_sequence(node: TreeNode) -> bool:
-        """Check if node is in the middle of a linear sequence."""
-        return (node.parent is not None and len(node.parent.children) == 1 and len(
-            node.children) == 1)
+        """Convert TreeNode to dictionary, including cluster data."""
+        node_dict = {
+            "token_id": node.token_id,
+            "token_text": node.token_text,
+            "probability": node.probability,
+            "depth": node.depth,
+            "children": [TreeOperations.to_dict(child, compress_linear) for child in node.children]
+        }
+        
+        if node.cluster_data:
+            node_dict["cluster_data"] = node.cluster_data
+            
+        return node_dict
 
     @staticmethod
     def to_json(root: TreeNode, compress_linear: bool = True, indent: int = 2) -> str:

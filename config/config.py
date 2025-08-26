@@ -1,40 +1,57 @@
 import configparser
 from pathlib import Path
-from typing import Union, Optional
+from typing import Optional
 
 
 class Config:
-    """Simple configuration loader for DIA settings."""
+    """Configuration loader with automatic path resolution."""
 
-    def __init__(self, config_path: str = "config.ini"):
+    def __init__(self, config_path: Optional[str] = None):
+        if config_path is None:
+            config_path = self._find_config_file()
+        
         self.config_path = Path(config_path)
         self.parser = configparser.ConfigParser()
         self.load()
 
+    def _find_config_file(self) -> str:
+        """Find config.ini in the project structure."""
+        # Start from this file's location
+        current = Path(__file__).parent
+        
+        # Look for config.ini in this directory first
+        config_file = current / "config.ini"
+        if config_file.exists():
+            return str(config_file)
+        
+        # Search upward in the directory tree
+        for parent in current.parents:
+            config_file = parent / "config" / "config.ini"
+            if config_file.exists():
+                return str(config_file)
+            
+            config_file = parent / "config.ini"
+            if config_file.exists():
+                return str(config_file)
+        
+        raise FileNotFoundError("config.ini not found in project structure")
+
     def load(self):
         """Load configuration from file."""
-        if not self.config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {self.config_path}")
-
         self.parser.read(self.config_path)
 
     def get(self, section: str, key: str, fallback: Optional[str] = None) -> str:
-        """Get string value from config."""
         return self.parser.get(section, key, fallback=fallback)
 
     def getint(self, section: str, key: str, fallback: int = 0) -> int:
-        """Get integer value from config."""
         return self.parser.getint(section, key, fallback=fallback)
 
     def getfloat(self, section: str, key: str, fallback: float = 0.0) -> float:
-        """Get float value from config."""
         return self.parser.getfloat(section, key, fallback=fallback)
 
     def getboolean(self, section: str, key: str, fallback: bool = False) -> bool:
-        """Get boolean value from config."""
         return self.parser.getboolean(section, key, fallback=fallback)
 
-    # Convenience properties for common settings
     @property
     def model_name(self) -> str:
         return self.get("model", "model_name", "gpt2")
@@ -65,20 +82,18 @@ class Config:
 
     @property
     def template_path(self) -> str:
-        return self.get("visualization", "template_path", "tree_template.html")
+        return self.get("visualization", "template_path", "templates/tree_template_old.html")
 
     @property
     def compress_linear(self) -> bool:
         return self.getboolean("visualization", "compress_linear", True)
 
 
-# Global config instance
 _config_instance = None
 
-
-def get_config(config_path: str = "config.ini") -> Config:
+def get_config() -> Config:
     """Get global config instance."""
     global _config_instance
     if _config_instance is None:
-        _config_instance = Config(config_path)
+        _config_instance = Config()
     return _config_instance

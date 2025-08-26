@@ -1,36 +1,46 @@
-import torch
-from divergent import DivergentGenerator
+from models.model_interface import create_generator
+from config.config import get_config
+from visualization.visualization import TreeVisualizer, TreePrinter
 
 
 def main():
-    print(f"CUDA available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
+    config = get_config()
 
-    generator = DivergentGenerator()
-    test_prompts = ["In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is"]
+    inference_model = config.get('model', 'model_name', 'mock')
+    embedding_model = config.get('embeddings', 'model_name', 'mock')
+    cluster_type = config.get('clustering', 'cluster_type', 'mock')
+
+    generator = create_generator(inference_model=inference_model,
+                                 embedding_model=embedding_model,
+                                 cluster_type=cluster_type)
+
+    analysis_output_dir = config.get('analysis', 'output_dir')
+    render_output_dir = config.get('visualization', 'output_dir')
+
+    tree_visualizer = TreeVisualizer()
+    printer = TreePrinter()
+
+    test_prompts = [
+        "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is"]
 
     for prompt in test_prompts:
         print(f"\n{'='*70}")
         print(f"PROMPT: {prompt}")
         print(f"{'='*70}")
 
-        # Generate tree and get complete analysis
-        analysis = generator.full_analysis(prompt, print_stems=False)
+        # Generate analysis report
+        report = generator.full_analysis(prompt, print_stems=False)
 
-        # Export visualization
-        html_path = generator.visualizer.quick_export(analysis['root'], prompt)
-        print(f"Visualization saved to: {html_path}")
+        # Save and visualize
+        json_path = report.save_json(analysis_output_dir)
+        html_path = tree_visualizer.export(report, render_output_dir)
 
-        # Print analysis results
-        print(f"\nBranching ratio: {analysis['branching_ratio']:.2f}")
-        print(f"Average path length: {analysis['average_path_length']:.1f}")
+        print(f"Analysis saved to: {json_path}")
+        print(f"visualization saved to: {html_path}")
 
-        generator.printer.print_sample_paths(
-            analysis['root'],
-            num_paths=3,
-            prompt=prompt
-        )
+        # Print summary
+        printer.print_statistics(report)
+        printer.print_sample_paths(report)
 
 
 if __name__ == "__main__":
