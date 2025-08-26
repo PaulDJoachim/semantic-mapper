@@ -19,11 +19,10 @@ class DBSCANClusterAnalyzer(ClusterAnalyzer):
 
     def analyze_clusters(self, embeddings: np.ndarray) -> ClusteringResult:
         """Cluster embeddings using DBSCAN."""
-        if len(embeddings) == 0:
+        total_stems = len(embeddings)
+        if total_stems == 0:
             return ClusteringResult([], 0, False, embeddings)
 
-        config = get_config()
-        total_stems = config.getint("generation", "num_stems")
         min_samples = max(2, int(self.min_sample_ratio * total_stems))
 
         clustering = DBSCAN(eps=self.eps, min_samples=min_samples, metric='cosine')
