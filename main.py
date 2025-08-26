@@ -1,6 +1,7 @@
 from models.model_interface import create_generator
 from config.config import get_config
 from visualization.visualization import TreeVisualizer, TreePrinter
+from visualization.cluster_visualizer import Cluster3DVisualizer
 
 
 def main():
@@ -16,9 +17,9 @@ def main():
 
     analysis_output_dir = config.get('analysis', 'output_dir')
 
-    template_path = config.get('visualization', 'template_path')
     render_output_dir = config.get('visualization', 'output_dir')
-    visualizer = TreeVisualizer(template_path, render_output_dir)
+    tree_visualizer = TreeVisualizer(render_output_dir)
+    cluster_visualizer = Cluster3DVisualizer(render_output_dir)
     printer = TreePrinter()
 
 
@@ -35,10 +36,10 @@ def main():
 
         # Save and visualize
         json_path = report.save_json(analysis_output_dir)
-        html_path = visualizer.quick_export(report)
+        html_path = cluster_visualizer.quick_export(report)
 
         print(f"Analysis saved to: {json_path}")
-        print(f"Visualization saved to: {html_path}")
+        print(f"visualization saved to: {html_path}")
 
         # Print summary
         printer.print_statistics(report)

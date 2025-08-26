@@ -1,107 +1,1 @@
-from pathlib import Path
-from typing import Optional
-import re
-from tree_utils import TreeOperations
-from reporting.analysis_report import AnalysisReport
-
-
-class TreeVisualizer:
-    """Interactive HTML visualization for analysis reports."""
-
-    def __init__(self, template_path: Optional[str] = None, output_dir: Optional[str] = None):
-        self.template_path = Path(template_path) if template_path else self._find_default_template()
-        self.output_dir = Path(output_dir) if output_dir else Path("./output")
-
-        if not self.template_path.exists():
-            raise FileNotFoundError(f"Template not found: {self.template_path}")
-
-    def _find_default_template(self) -> Path:
-        """Find default template in project structure."""
-        current = Path(__file__).parent
-        for parent in [current] + list(current.parents):
-            template_path = parent / "templates" / "tree_template.html"
-            if template_path.exists():
-                return template_path
-        raise FileNotFoundError("Default template not found")
-
-    def export_to_html(self, report: AnalysisReport, output_path: str) -> None:
-        """Export analysis report to HTML visualization."""
-        template_content = self.template_path.read_text(encoding='utf-8')
-
-        # Determine what data the template needs
-        template_vars = {}
-        if '{title}' in template_content:
-            template_vars['title'] = f"Tree: {report.prompt[:50]}..."
-        if '{tree_data}' in template_content:
-            template_vars['tree_data'] = report.to_json()
-        if '{cluster_data}' in template_content:
-            template_vars['cluster_data'] = report._extract_cluster_summary()
-
-        html_content = template_content.format(**template_vars)
-
-        Path(output_path).write_text(html_content, encoding='utf-8')
-
-    def quick_export(self, report: AnalysisReport) -> str:
-        """Generate filename and export report."""
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create safe filename from prompt and timestamp
-        safe_prompt = re.sub(r'[^\w\s-]', '', report.prompt)[:30].strip()
-        safe_prompt = re.sub(r'[-\s]+', '_', safe_prompt)
-        timestamp = report.timestamp.split('T')[0].replace('-', '')
-
-        filename = f"tree_{timestamp}_{safe_prompt}.html"
-        output_path = self.output_dir / filename
-
-        self.export_to_html(report, str(output_path))
-        return str(output_path)
-
-
-class TreePrinter:
-    """Text-based tree display for analysis reports."""
-
-    def print_tree(self, report: AnalysisReport, max_depth: Optional[int] = None):
-        """Print ASCII tree from report."""
-        TreeOperations.print_tree(report.root, max_depth=max_depth)
-
-    def print_statistics(self, report: AnalysisReport):
-        """Print tree statistics from report."""
-        print("Analysis Statistics:")
-        for key, value in report.tree_statistics.items():
-            print(f"  {key}: {value}")
-        print(f"  branching_ratio: {report.branching_ratio:.3f}")
-        print(f"  average_path_length: {report.average_path_length:.1f}")
-
-    def print_sample_paths(self, report: AnalysisReport, num_paths: Optional[int] = None):
-        """Print sample paths from report."""
-        paths = report.sample_paths
-        display_count = num_paths or min(10, len(paths))
-
-        print(f"\nSample paths ({display_count} of {len(paths)}):")
-        for i, path in enumerate(paths[:display_count]):
-            print(f"\nPath {i + 1}: {report.prompt}{path}")
-
-    def print_cluster_summary(self, report: AnalysisReport):
-        """Print cluster analysis summary from report."""
-        cluster_summary = report._extract_cluster_summary()
-
-        print(f"\nCluster Summary:")
-        print(f"  Total samples: {cluster_summary['total_samples']}")
-        print(f"  Nodes with clusters: {cluster_summary['nodes_with_clusters']}")
-
-        if cluster_summary['cluster_stats']:
-            print("  Cluster distribution:")
-            for cluster, count in cluster_summary['cluster_stats'].items():
-                print(f"    {cluster}: {count}")
-
-    def full_report(self, report: AnalysisReport):
-        """Print complete analysis report."""
-        print(f"\n{'='*70}")
-        print(f"ANALYSIS REPORT: {report.prompt}")
-        print(f"Generated: {report.timestamp}")
-        print(f"Model: {report.model_info}")
-        print(f"{'='*70}")
-
-        self.print_statistics(report)
-        self.print_cluster_summary(report)
-        self.print_sample_paths(report)
+from pathlib import Pathfrom typing import Optionalimport refrom tree_utils import TreeOperationsfrom reporting.analysis_report import AnalysisReportclass TreeVisualizer:    """Interactive HTML visualization for analysis reports."""    def __init__(self, template_path: Optional[str] = None, output_dir: Optional[str] = None):        self.template_path = Path(template_path) if template_path else self._find_default_template()        self.output_dir = Path(output_dir) if output_dir else Path("./output")        if not self.template_path.exists():            raise FileNotFoundError(f"Template not found: {self.template_path}")    def _find_default_template(self) -> Path:        """Find default template in project structure."""        current = Path(__file__).parent        for parent in [current] + list(current.parents):            template_path = parent / "templates" / "tree_template.html"            if template_path.exists():                return template_path        raise FileNotFoundError("Default template not found")    def export_to_html(self, report: AnalysisReport, output_path: str) -> None:        """Export analysis report to HTML visualization."""        template_content = self.template_path.read_text(encoding='utf-8')        # Determine what data the template needs        template_vars = {}        if '{title}' in template_content:            template_vars['title'] = f"Tree: {report.prompt[:50]}..."        if '{tree_data}' in template_content:            template_vars['tree_data'] = report.to_json()        if '{cluster_data}' in template_content:            template_vars['cluster_data'] = report._extract_cluster_summary()        html_content = template_content.format(**template_vars)        Path(output_path).write_text(html_content, encoding='utf-8')    def quick_export(self, report: AnalysisReport) -> str:        """Generate filename and export report."""        self.output_dir.mkdir(parents=True, exist_ok=True)        # Create safe filename from prompt and timestamp        safe_prompt = re.sub(r'[^\w\s-]', '', report.prompt)[:30].strip()        safe_prompt = re.sub(r'[-\s]+', '_', safe_prompt)        timestamp = report.timestamp.split('T')[0].replace('-', '')        filename = f"tree_{timestamp}_{safe_prompt}.html"        output_path = self.output_dir / filename        self.export_to_html(report, str(output_path))        return str(output_path)class TreePrinter:    """Text-based tree display for analysis reports."""    def print_tree(self, report: AnalysisReport, max_depth: Optional[int] = None):        """Print ASCII tree from report."""        TreeOperations.print_tree(report.root, max_depth=max_depth)    def print_statistics(self, report: AnalysisReport):        """Print tree statistics from report."""        print("Analysis Statistics:")        for key, value in report.tree_statistics.items():            print(f"  {key}: {value}")        print(f"  branching_ratio: {report.branching_ratio:.3f}")        print(f"  average_path_length: {report.average_path_length:.1f}")    def print_sample_paths(self, report: AnalysisReport, num_paths: Optional[int] = None):        """Print sample paths from report."""        paths = report.sample_paths        display_count = num_paths or min(10, len(paths))        print(f"\nSample paths ({display_count} of {len(paths)}):")        for i, path in enumerate(paths[:display_count]):            print(f"\nPath {i + 1}: {report.prompt}{path}")    def print_cluster_summary(self, report: AnalysisReport):        """Print cluster analysis summary from report."""        cluster_summary = report._extract_cluster_summary()        print(f"\nCluster Summary:")        print(f"  Total samples: {cluster_summary['total_samples']}")        print(f"  Nodes with clusters: {cluster_summary['nodes_with_clusters']}")        if cluster_summary['cluster_stats']:            print("  Cluster distribution:")            for cluster, count in cluster_summary['cluster_stats'].items():                print(f"    {cluster}: {count}")    def full_report(self, report: AnalysisReport):        """Print complete analysis report."""        print(f"\n{'='*70}")        print(f"ANALYSIS REPORT: {report.prompt}")        print(f"Generated: {report.timestamp}")        print(f"Model: {report.model_info}")        print(f"{'='*70}")        self.print_statistics(report)        self.print_cluster_summary(report)        self.print_sample_paths(report)

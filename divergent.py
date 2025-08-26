@@ -4,9 +4,10 @@ from typing import List, Optional, Dict, Any, Tuple
 from tree_utils import TreeNode, TreeOperations
 from models.model_interface import ModelInterface
 from semantic_embedding.embedding_provider import EmbeddingProvider
-from clustering.cluster_analyzer import ClusterAnalyzer
+from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
 from config.config import get_config
 from reporting.analysis_report import AnalysisReport
+from sklearn.decomposition import PCA
 
 
 class DivergentGenerator:
@@ -65,17 +66,18 @@ class DivergentGenerator:
                     continue
 
                 # Generate stems with dynamic sampling
-                stem_tokens, stem_texts, total_generated = self._generate_stems_until_clustered(
-                    branch_sequence, num_stems, stem_length, temperature, top_k, top_p, max_stems_per_node
-                )
+                stem_tokens, stem_texts, clustering_result, total_generated = (
+                    self._generate_stems_until_clustered(branch_sequence,
+                                                         num_stems,
+                                                         stem_length,
+                                                         temperature,
+                                                         top_k,
+                                                         top_p,
+                                                         max_stems_per_node))
 
                 # Print stems if requested
                 if print_stems:
                     self._print_stems(stem_texts, branch_node, prompt)
-
-                # Generate embeddings and analyze clusters
-                embeddings = self.embedding_provider.get_embeddings(stem_texts)
-                clustering_result = self.cluster_analyzer.analyze_clusters(embeddings)
 
                 print(f"Node at depth {branch_node.depth}: {total_generated} stems -> {clustering_result.num_clusters} clusters")
 
@@ -128,12 +130,12 @@ class DivergentGenerator:
         return root
 
     def _generate_stems_until_clustered(self, branch_sequence: Any,
-                                       initial_num_stems: int,
-                                       stem_length: int,
-                                       temperature: float,
-                                       top_k: int,
-                                       top_p: float,
-                                       max_total_stems: int = 2000) -> Tuple[List[Any], List[str], int]:
+                                        initial_num_stems: int,
+                                        stem_length: int,
+                                        temperature: float,
+                                        top_k: int,
+                                        top_p: float,
+                                        max_total_stems: int = 2000) -> Tuple[List[Any], List[str], ClusteringResult, int]:
         """
         Generate stems iteratively until clusters are found or max limit reached.
 
@@ -142,6 +144,7 @@ class DivergentGenerator:
         """
         all_stem_tokens = []
         all_stem_texts = []
+        all_stem_embeddings = []
         current_batch_size = initial_num_stems
         total_generated = 0
 
@@ -150,18 +153,19 @@ class DivergentGenerator:
             stems = self.model.generate_stems(branch_sequence, current_batch_size, stem_length,
                                             temperature=temperature, top_k=top_k, top_p=top_p)
 
-            # Extract tokens and texts
+            # Extract tokens, texts, and embeddings
             batch_tokens = [stem[0] for stem in stems]
             batch_texts = [self.model.decode(tokens) for tokens in batch_tokens]
+            batch_embeddings = self.embedding_provider.get_embeddings(batch_texts)
 
             # Add to accumulated results
             all_stem_tokens.extend(batch_tokens)
             all_stem_texts.extend(batch_texts)
+            all_stem_embeddings.extend(batch_embeddings)
+
             total_generated += current_batch_size
 
-            # Check if we have clusters with current batch
-            embeddings = self.embedding_provider.get_embeddings(all_stem_texts)
-            clustering_result = self.cluster_analyzer.analyze_clusters(embeddings)
+            clustering_result = self.cluster_analyzer.analyze_clusters(all_stem_embeddings)
 
             if clustering_result.num_clusters > 0:
                 # Found clusters, we're done
@@ -175,7 +179,7 @@ class DivergentGenerator:
             current_batch_size = min(current_batch_size * 2, max_total_stems - total_generated)
             print(f"No clusters found with {total_generated} stems, generating {current_batch_size} more...")
 
-        return all_stem_tokens, all_stem_texts, total_generated
+        return all_stem_tokens, all_stem_texts, clustering_result, total_generated
 
     def _print_stems(self, stem_texts: List[str], branch_node: TreeNode, original_prompt: str):
         """Print stems for inspection."""
