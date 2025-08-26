@@ -1,9 +1,11 @@
 from models.model_interface import create_generator
 from config.config import get_config
+from visualization.visualization import TreeVisualizer, TreePrinter
 
 
 def main():
     config = get_config()
+
     model_name = config.get('model', 'model_name', 'mock')
     embedding_model = config.get('embeddings', 'model', 'mock')
     cluster_type = config.get('clustering', 'cluster_type', 'mock')
@@ -12,28 +14,35 @@ def main():
                                  embedding_model=embedding_model,
                                  cluster_type=cluster_type)
 
-    # TODO: move this into a JSON or something
+    analysis_output_dir = config.get('analysis', 'output_dir')
+
+    template_path = config.get('visualization', 'template_path')
+    render_output_dir = config.get('visualization', 'output_dir')
+    visualizer = TreeVisualizer(template_path, render_output_dir)
+    printer = TreePrinter()
+
+
     test_prompts = [
-        "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is"
-    ]
+        "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is"]
 
     for prompt in test_prompts:
         print(f"\n{'='*70}")
         print(f"PROMPT: {prompt}")
         print(f"{'='*70}")
 
-        analysis = generator.full_analysis(prompt, print_stems=False)
-        html_path = generator.visualizer.quick_export(analysis['root'], prompt)
-        
-        print(f"Visualization: {html_path}")
-        print(f"Branching ratio: {analysis['branching_ratio']:.2f}")
-        print(f"Average path length: {analysis['average_path_length']:.1f}")
+        # Generate analysis report
+        report = generator.full_analysis(prompt, print_stems=False)
 
-        generator.printer.print_sample_paths(
-            analysis['root'],
-            num_paths=3,
-            prompt=prompt
-        )
+        # Save and visualize
+        json_path = report.save_json(analysis_output_dir)
+        html_path = visualizer.quick_export(report)
+
+        print(f"Analysis saved to: {json_path}")
+        print(f"Visualization saved to: {html_path}")
+
+        # Print summary
+        printer.print_statistics(report)
+        printer.print_sample_paths(report)
 
 
 if __name__ == "__main__":

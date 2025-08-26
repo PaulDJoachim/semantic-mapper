@@ -1,100 +1,107 @@
 from pathlib import Path
 from typing import Optional
-from tree_utils import TreeNode, TreeOperations
-from config.config import get_config
+import re
+from tree_utils import TreeOperations
+from reporting.analysis_report import AnalysisReport
 
 
 class TreeVisualizer:
-    """Interactive HTML visualization for trees."""
+    """Interactive HTML visualization for analysis reports."""
 
-    def __init__(self, template_path: Optional[str] = None):
-        self.config = get_config()
-        
-        if template_path:
-            self.template_path = Path(template_path)
-        else:
-            # Find template relative to project structure
-            self.template_path = self._find_template()
+    def __init__(self, template_path: Optional[str] = None, output_dir: Optional[str] = None):
+        self.template_path = Path(template_path) if template_path else self._find_default_template()
+        self.output_dir = Path(output_dir) if output_dir else Path("./output")
 
         if not self.template_path.exists():
             raise FileNotFoundError(f"Template not found: {self.template_path}")
 
-    def _find_template(self) -> Path:
-        """Locate template file in project structure."""
-        template_name = self.config.get("visualization", "template_path", "tree_template_old.html")
-        
-        # Start from this file's directory
+    def _find_default_template(self) -> Path:
+        """Find default template in project structure."""
         current = Path(__file__).parent
-        
-        # Look for templates directory
         for parent in [current] + list(current.parents):
-            template_path = parent / "templates" / Path(template_name).name
+            template_path = parent / "templates" / "tree_template.html"
             if template_path.exists():
                 return template_path
-            
-            # Also check direct path from config
-            template_path = parent / template_name
-            if template_path.exists():
-                return template_path
-        
-        raise FileNotFoundError(f"Template {template_name} not found")
+        raise FileNotFoundError("Default template not found")
 
-    def export_to_html(self, root: TreeNode, output_path: str,
-                      title: str = "Divergent Tree Visualization",
-                      compress_linear: bool = None) -> None:
-        """Export tree to HTML visualization."""
-        compress_linear = compress_linear if compress_linear is not None else self.config.compress_linear
-        tree_json = TreeOperations.to_json(root, compress_linear)
-
+    def export_to_html(self, report: AnalysisReport, output_path: str) -> None:
+        """Export analysis report to HTML visualization."""
         template_content = self.template_path.read_text(encoding='utf-8')
-        html_content = template_content.format(title=title, tree_data=tree_json)
+
+        # Determine what data the template needs
+        template_vars = {}
+        if '{title}' in template_content:
+            template_vars['title'] = f"Tree: {report.prompt[:50]}..."
+        if '{tree_data}' in template_content:
+            template_vars['tree_data'] = report.to_json()
+        if '{cluster_data}' in template_content:
+            template_vars['cluster_data'] = report._extract_cluster_summary()
+
+        html_content = template_content.format(**template_vars)
 
         Path(output_path).write_text(html_content, encoding='utf-8')
-        print(f"Visualization exported to {output_path}")
 
-    def quick_export(self, root: TreeNode, prompt: str,
-                    output_dir: str = None, **kwargs) -> str:
-        """Generate filename and export in one step."""
-        output_dir = output_dir or self.config.output_dir
+    def quick_export(self, report: AnalysisReport) -> str:
+        """Generate filename and export report."""
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        safe_prompt = "".join(c for c in prompt if c.isalnum() or c.isspace())
-        safe_prompt = safe_prompt.replace(" ", "_")[:20]
-        output_path = Path(output_dir) / f"tree_{safe_prompt}.html"
-        
-        # Ensure output directory exists
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Create safe filename from prompt and timestamp
+        safe_prompt = re.sub(r'[^\w\s-]', '', report.prompt)[:30].strip()
+        safe_prompt = re.sub(r'[-\s]+', '_', safe_prompt)
+        timestamp = report.timestamp.split('T')[0].replace('-', '')
 
-        title = kwargs.pop("title", f"Tree: {prompt}")
-        self.export_to_html(root, str(output_path), title, **kwargs)
+        filename = f"tree_{timestamp}_{safe_prompt}.html"
+        output_path = self.output_dir / filename
+
+        self.export_to_html(report, str(output_path))
         return str(output_path)
 
 
 class TreePrinter:
-    """Text-based tree display."""
+    """Text-based tree display for analysis reports."""
 
-    def __init__(self):
-        self.config = get_config()
+    def print_tree(self, report: AnalysisReport, max_depth: Optional[int] = None):
+        """Print ASCII tree from report."""
+        TreeOperations.print_tree(report.root, max_depth=max_depth)
 
-    def print_tree(self, root: TreeNode, max_depth: Optional[int] = None):
-        """Print ASCII tree."""
-        max_depth = max_depth or self.config.getint("visualization", "max_display_depth", 10)
-        TreeOperations.print_tree(root, max_depth=max_depth)
-
-    def print_statistics(self, root: TreeNode):
-        """Print tree statistics."""
-        stats = TreeOperations.get_statistics(root)
-        print("Tree Statistics:")
-        for key, value in stats.items():
+    def print_statistics(self, report: AnalysisReport):
+        """Print tree statistics from report."""
+        print("Analysis Statistics:")
+        for key, value in report.tree_statistics.items():
             print(f"  {key}: {value}")
+        print(f"  branching_ratio: {report.branching_ratio:.3f}")
+        print(f"  average_path_length: {report.average_path_length:.1f}")
 
-    def print_sample_paths(self, root: TreeNode, num_paths: int = None,
-                          min_depth: Optional[int] = None, prompt: str = ""):
-        """Print sample paths."""
-        num_paths = num_paths or self.config.getint("analysis", "sample_paths_count", 10)
-        min_depth = min_depth or self.config.getint("analysis", "min_path_depth", 5)
+    def print_sample_paths(self, report: AnalysisReport, num_paths: Optional[int] = None):
+        """Print sample paths from report."""
+        paths = report.sample_paths
+        display_count = num_paths or min(10, len(paths))
 
-        paths = TreeOperations.get_all_paths(root, min_depth)
-        print(f"\nSample paths ({min(num_paths, len(paths))} of {len(paths)}):")
+        print(f"\nSample paths ({display_count} of {len(paths)}):")
+        for i, path in enumerate(paths[:display_count]):
+            print(f"\nPath {i + 1}: {report.prompt}{path}")
 
-        for i, path in enumerate(paths[:num_paths]):
-            print(f"\nPath {i + 1}: {prompt}{path}")
+    def print_cluster_summary(self, report: AnalysisReport):
+        """Print cluster analysis summary from report."""
+        cluster_summary = report._extract_cluster_summary()
+
+        print(f"\nCluster Summary:")
+        print(f"  Total samples: {cluster_summary['total_samples']}")
+        print(f"  Nodes with clusters: {cluster_summary['nodes_with_clusters']}")
+
+        if cluster_summary['cluster_stats']:
+            print("  Cluster distribution:")
+            for cluster, count in cluster_summary['cluster_stats'].items():
+                print(f"    {cluster}: {count}")
+
+    def full_report(self, report: AnalysisReport):
+        """Print complete analysis report."""
+        print(f"\n{'='*70}")
+        print(f"ANALYSIS REPORT: {report.prompt}")
+        print(f"Generated: {report.timestamp}")
+        print(f"Model: {report.model_info}")
+        print(f"{'='*70}")
+
+        self.print_statistics(report)
+        self.print_cluster_summary(report)
+        self.print_sample_paths(report)
