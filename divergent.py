@@ -13,12 +13,12 @@ from sklearn.decomposition import PCA
 class DivergentGenerator:
     """Generates text trees by exploring semantic branching points."""
 
-    def __init__(self, model_interface: ModelInterface,
+    def __init__(self, inference_model: ModelInterface,
                  embedding_provider: EmbeddingProvider,
                  cluster_analyzer: ClusterAnalyzer):
 
         self.config = get_config()
-        self.model = model_interface
+        self.model = inference_model
         self.embedding_provider = embedding_provider
         self.cluster_analyzer = cluster_analyzer
 
@@ -144,7 +144,7 @@ class DivergentGenerator:
         """
         all_stem_tokens = []
         all_stem_texts = []
-        all_stem_embeddings = []
+        all_stem_embeddings = None
         current_batch_size = initial_num_stems
         total_generated = 0
 
@@ -161,7 +161,12 @@ class DivergentGenerator:
             # Add to accumulated results
             all_stem_tokens.extend(batch_tokens)
             all_stem_texts.extend(batch_texts)
-            all_stem_embeddings.extend(batch_embeddings)
+
+            if all_stem_embeddings is None:
+                all_stem_embeddings = batch_embeddings
+            else:
+                all_stem_embeddings = np.concatenate(
+                    [all_stem_embeddings, batch_embeddings], axis=0)
 
             total_generated += current_batch_size
 

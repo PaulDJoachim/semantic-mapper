@@ -45,7 +45,7 @@ def get_embedder(embedding_model: str = None, **kwargs):
     if embedding_model == "mock":
         from semantic_embedding.mock_embedding import MockEmbeddingProvider
         embedding_provider = MockEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
-    elif embedding_model == "sentence":
+    elif embedding_model == "all-MiniLM-L6-v2":
         from semantic_embedding.sentence_embedding import SentenceEmbeddingProvider
         embedding_provider = SentenceEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
     else:
@@ -67,16 +67,16 @@ def get_grouper(clustering_type: str = None, **kwargs):
     return cluster_analyzer
 
 
-def create_generator(model_name: str, embedding_model: str = None, cluster_type: str = None, **kwargs):
+def create_generator(inference_model: str, embedding_model: str, cluster_type: str, **kwargs):
     """Create DivergentGenerator with specified components."""
     from divergent import DivergentGenerator
 
-    model = get_model(model_name, **kwargs.get('model_kwargs', {}))
+    inference_model = get_model(inference_model, **kwargs.get('model_kwargs', {}))
     embedding_provider = get_embedder(embedding_model, **kwargs.get('embedder_kwargs', {}))
     cluster_analyzer = get_grouper(cluster_type, **kwargs.get('cluster_kwargs', {}))
 
     return DivergentGenerator(
-        model_interface=model,
+        inference_model=inference_model,
         embedding_provider=embedding_provider,
         cluster_analyzer=cluster_analyzer
     )

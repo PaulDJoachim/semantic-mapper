@@ -7,11 +7,11 @@ from visualization.cluster_visualizer import Cluster3DVisualizer
 def main():
     config = get_config()
 
-    model_name = config.get('model', 'model_name', 'mock')
-    embedding_model = config.get('embeddings', 'model', 'mock')
+    inference_model = config.get('model', 'model_name', 'mock')
+    embedding_model = config.get('embeddings', 'model_name', 'mock')
     cluster_type = config.get('clustering', 'cluster_type', 'mock')
 
-    generator = create_generator(model_name=model_name,
+    generator = create_generator(inference_model=inference_model,
                                  embedding_model=embedding_model,
                                  cluster_type=cluster_type)
 
