@@ -150,13 +150,155 @@
     <script>
         const treeData = {tree_data};
 
+        class ClusterVisualizer {{
+            constructor(canvas, options = {{}}) {{
+                this.canvas = canvas;
+                this.options = {{
+                    autoRotate: options.autoRotate !== false,
+                    fullscreen: options.fullscreen === true,
+                    ...options
+                }};
+
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.rayGroup = null;
+                this.sphereGroup = null;
+                this.isRotating = this.options.autoRotate;
+                this.currentData = null;
+
+                this.init();
+            }}
+
+            init() {{
+                if (!window.THREE) {{
+                    console.warn('Three.js not available');
+                    return;
+                }}
+
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x111111);
+
+                const rect = this.canvas.getBoundingClientRect();
+                this.camera = new THREE.PerspectiveCamera(75, rect.width / rect.height, 0.1, 1000);
+                this.camera.position.set(2, 1, 2);
+
+                this.renderer = new THREE.WebGLRenderer({{ canvas: this.canvas, antialias: true }});
+                this.renderer.setSize(rect.width, rect.height);
+
+                const ambient = new THREE.AmbientLight(0x404040, 0.6);
+                this.scene.add(ambient);
+
+                const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+                directional.position.set(1, 1, 1);
+                this.scene.add(directional);
+
+                const axes = new THREE.AxesHelper(0.8);
+                this.scene.add(axes);
+
+                const originGeo = new THREE.SphereGeometry(0.02, 16, 16);
+                const originMat = new THREE.MeshBasicMaterial({{ color: 0xffffff }});
+                const origin = new THREE.Mesh(originGeo, originMat);
+                this.scene.add(origin);
+
+                this.rayGroup = new THREE.Group();
+                this.sphereGroup = new THREE.Group();
+                this.scene.add(this.rayGroup);
+                this.scene.add(this.sphereGroup);
+
+                this.setupControls();
+                this.animate();
+            }}
+
+            setupControls() {{
+                if (!this.renderer) return;
+
+                let isDragging = false;
+                let previousMouse = {{ x: 0, y: 0 }};
+
+                this.canvas.addEventListener('mousedown', () => {{
+                    isDragging = false;
+                }});
+
+                this.canvas.addEventListener('mousemove', (e) => {{
+                    if (e.buttons === 1) {{
+                        isDragging = true;
+                        const deltaMove = {{
+                            x: e.offsetX - previousMouse.x,
+                            y: e.offsetY - previousMouse.y
+                        }};
+
+                        const deltaRotationQuaternion = new THREE.Quaternion()
+                            .setFromEuler(new THREE.Euler(
+                                deltaMove.y * 0.01,
+                                deltaMove.x * 0.01,
+                                0,
+                                'XYZ'
+                            ));
+
+                        this.camera.quaternion.multiplyQuaternions(deltaRotationQuaternion, this.camera.quaternion);
+                    }}
+                    previousMouse = {{ x: e.offsetX, y: e.offsetY }};
+                }});
+            }}
+
+            showClusters(clusterData) {{
+                this.currentData = clusterData;
+                this.clear();
+
+                if (!clusterData || !clusterData.samples) return;
+
+                clusterData.samples.forEach(sample => {{
+                    const direction = new THREE.Vector3(...sample.direction);
+                    const rayLength = 0.6 + sample.confidence * 0.4;
+                    const endPoint = direction.multiplyScalar(rayLength);
+
+                    const rayGeo = new THREE.BufferGeometry();
+                    rayGeo.setFromPoints([new THREE.Vector3(0, 0, 0), endPoint]);
+
+                    const rayMat = new THREE.LineBasicMaterial({{
+                        color: sample.color,
+                        opacity: 0.8,
+                        transparent: true
+                    }});
+
+                    const ray = new THREE.Line(rayGeo, rayMat);
+                    this.rayGroup.add(ray);
+
+                    const sphereGeo = new THREE.SphereGeometry(0.015, 8, 8);
+                    const sphereMat = new THREE.MeshPhongMaterial({{ color: sample.color }});
+                    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+                    sphere.position.copy(endPoint);
+                    this.sphereGroup.add(sphere);
+                }});
+            }}
+
+            clear() {{
+                this.rayGroup.clear();
+                this.sphereGroup.clear();
+            }}
+
+            animate() {{
+                if (!this.renderer) return;
+
+                requestAnimationFrame(() => this.animate());
+
+                if (this.isRotating && this.rayGroup.children.length > 0) {{
+                    this.rayGroup.rotation.y += 0.005;
+                    this.sphereGroup.rotation.y += 0.005;
+                }}
+
+                this.renderer.render(this.scene, this.camera);
+            }}
+        }}
+
         class TreeVisualizer {{
             constructor(canvas, treeData) {{
                 this.canvas = canvas;
                 this.ctx = canvas.getContext('2d');
                 this.treeData = treeData;
                 this.selectedNode = null;
-                this.cluster3D = null;
+                this.clusterViewer = null;
 
                 this.viewState = {{
                     offsetX: canvas.width / 2,
@@ -168,18 +310,20 @@
 
                 this.nodes = [];
                 this.edges = [];
-                this.expandedNodes = new Set();
                 this.nodeDimensionsCache = new Map();
 
                 this.setupEventListeners();
                 this.processTree();
                 this.render();
-                this.initCluster3D();
+                this.initClusterViewer();
             }}
 
-            initCluster3D() {{
+            initClusterViewer() {{
                 const canvas3d = document.getElementById('cluster-viewer');
-                this.cluster3D = new Cluster3DViewer(canvas3d);
+                this.clusterViewer = new ClusterVisualizer(canvas3d, {{
+                    fullscreen: false,
+                    autoRotate: true
+                }});
             }}
 
             setupEventListeners() {{
@@ -276,7 +420,7 @@
                 this.selectedNode = node;
                 this.render();
 
-                if (node.cluster_data) {{
+                if (node.cluster_data && node.cluster_data.samples && node.cluster_data.samples.length > 0) {{
                     this.showClusterData(node);
                 }} else {{
                     this.hideClusterData();
@@ -288,7 +432,7 @@
                 document.getElementById('cluster-content').classList.remove('hidden');
                 document.getElementById('selected-node-text').textContent = `"${{node.text.substring(0, 50)}}..."`;
 
-                const stats = node.cluster_data.stats;
+                const stats = node.cluster_data.stats || {{}};
                 const statsHtml = Object.entries(stats)
                     .map(([cluster, count]) => `<div>${{cluster}}: ${{count}} samples</div>`)
                     .join('');
@@ -299,13 +443,13 @@
                     .join('');
                 document.getElementById('cluster-samples').innerHTML = samplesHtml;
 
-                this.cluster3D.showClusters(node.cluster_data);
+                this.clusterViewer.showClusters(node.cluster_data);
             }}
 
             hideClusterData() {{
                 document.getElementById('no-selection').classList.remove('hidden');
                 document.getElementById('cluster-content').classList.add('hidden');
-                this.cluster3D.clear();
+                this.clusterViewer.clear();
             }}
 
             screenToWorld(screenX, screenY) {{
@@ -493,7 +637,7 @@
                 const color = `hsl(${{hue}}, ${{saturation}}%, ${{lightness}}%)`;
 
                 const isSelected = this.selectedNode && this.selectedNode.id === node.id;
-                const hasClusterData = node.cluster_data && node.cluster_data.samples.length > 0;
+                const hasClusterData = node.cluster_data && node.cluster_data.samples && node.cluster_data.samples.length > 0;
 
                 let borderColor = '#cccccc';
                 let borderWidth = Math.max(1, 2 * this.viewState.zoom);
@@ -535,90 +679,6 @@
                 this.ctx.lineTo(x, y + radius);
                 this.ctx.quadraticCurveTo(x, y, x + radius, y);
                 this.ctx.closePath();
-            }}
-        }}
-
-        class Cluster3DViewer {{
-            constructor(canvas) {{
-                this.canvas = canvas;
-                this.scene = null;
-                this.camera = null;
-                this.renderer = null;
-                this.rayGroup = null;
-                this.init();
-            }}
-
-            init() {{
-                if (!window.THREE) return;
-
-                this.scene = new THREE.Scene();
-                this.scene.background = new THREE.Color(0x111111);
-
-                this.camera = new THREE.PerspectiveCamera(75, this.canvas.width / this.canvas.height, 0.1, 1000);
-                this.camera.position.set(2, 1, 2);
-
-                this.renderer = new THREE.WebGLRenderer({{ canvas: this.canvas, antialias: true }});
-                this.renderer.setSize(this.canvas.width, this.canvas.height);
-
-                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
-                this.scene.add(ambientLight);
-
-                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-                directionalLight.position.set(1, 1, 1);
-                this.scene.add(directionalLight);
-
-                this.rayGroup = new THREE.Group();
-                this.scene.add(this.rayGroup);
-
-                this.animate();
-            }}
-
-            showClusters(clusterData) {{
-                if (!this.rayGroup) return;
-
-                this.rayGroup.clear();
-
-                clusterData.samples.forEach(sample => {{
-                    const direction = new THREE.Vector3(...sample.direction);
-                    const rayLength = 0.8 + sample.confidence * 0.4;
-                    const endPoint = direction.multiplyScalar(rayLength);
-
-                    const rayGeometry = new THREE.BufferGeometry();
-                    rayGeometry.setFromPoints([new THREE.Vector3(0, 0, 0), endPoint]);
-
-                    const rayMaterial = new THREE.LineBasicMaterial({{
-                        color: sample.color,
-                        opacity: 0.8,
-                        transparent: true
-                    }});
-
-                    const ray = new THREE.Line(rayGeometry, rayMaterial);
-                    this.rayGroup.add(ray);
-
-                    const sphereGeometry = new THREE.SphereGeometry(0.02, 8, 8);
-                    const sphereMaterial = new THREE.MeshPhongMaterial({{ color: sample.color }});
-                    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-                    sphere.position.copy(endPoint);
-                    this.rayGroup.add(sphere);
-                }});
-            }}
-
-            clear() {{
-                if (this.rayGroup) {{
-                    this.rayGroup.clear();
-                }}
-            }}
-
-            animate() {{
-                if (!this.renderer) return;
-
-                requestAnimationFrame(() => this.animate());
-
-                if (this.rayGroup && this.rayGroup.children.length > 0) {{
-                    this.rayGroup.rotation.y += 0.005;
-                }}
-
-                this.renderer.render(this.scene, this.camera);
             }}
         }}
 

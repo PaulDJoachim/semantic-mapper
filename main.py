@@ -1,7 +1,6 @@
 from models.model_interface import create_generator
 from config.config import get_config
 from visualization.visualization import TreeVisualizer, TreePrinter
-from visualization.cluster_visualizer import Cluster3DVisualizer
 
 
 def main():
@@ -16,12 +15,10 @@ def main():
                                  cluster_type=cluster_type)
 
     analysis_output_dir = config.get('analysis', 'output_dir')
-
     render_output_dir = config.get('visualization', 'output_dir')
-    tree_visualizer = TreeVisualizer(render_output_dir)
-    cluster_visualizer = Cluster3DVisualizer(render_output_dir)
-    printer = TreePrinter()
 
+    tree_visualizer = TreeVisualizer()
+    printer = TreePrinter()
 
     test_prompts = [
         "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is"]
@@ -36,7 +33,7 @@ def main():
 
         # Save and visualize
         json_path = report.save_json(analysis_output_dir)
-        html_path = cluster_visualizer.quick_export(report)
+        html_path = tree_visualizer.export(report, render_output_dir)
 
         print(f"Analysis saved to: {json_path}")
         print(f"visualization saved to: {html_path}")

@@ -8,52 +8,32 @@ from reporting.analysis_report import AnalysisReport
 class TreeVisualizer:
     """Interactive HTML visualization for analysis reports."""
 
-    def __init__(self, template_path: Optional[str] = None, output_dir: Optional[str] = None):
-        self.template_path = Path(template_path) if template_path else self._find_default_template()
-        self.output_dir = Path(output_dir) if output_dir else Path("./output")
-
+    def __init__(self):
+        self.template_path = Path("./templates/tree_template.html")
         if not self.template_path.exists():
             raise FileNotFoundError(f"Template not found: {self.template_path}")
 
-    def _find_default_template(self) -> Path:
-        """Find default template in project structure."""
-        current = Path(__file__).parent
-        for parent in [current] + list(current.parents):
-            template_path = parent / "templates" / "tree_template.html"
-            if template_path.exists():
-                return template_path
-        raise FileNotFoundError("Default template not found")
+    def export(self, report: AnalysisReport, output_dir: str) -> str:
+        """Export report to HTML and return the output path."""
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    def export_to_html(self, report: AnalysisReport, output_path: str) -> None:
-        """Export analysis report to HTML visualization."""
-        template_content = self.template_path.read_text(encoding='utf-8')
-
-        # Determine what data the template needs
-        template_vars = {}
-        if '{title}' in template_content:
-            template_vars['title'] = f"Tree: {report.prompt[:50]}..."
-        if '{tree_data}' in template_content:
-            template_vars['tree_data'] = report.to_json()
-        if '{cluster_data}' in template_content:
-            template_vars['cluster_data'] = report._extract_cluster_summary()
-
-        html_content = template_content.format(**template_vars)
-
-        Path(output_path).write_text(html_content, encoding='utf-8')
-
-    def quick_export(self, report: AnalysisReport) -> str:
-        """Generate filename and export report."""
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create safe filename from prompt and timestamp
+        # Generate filename from prompt
         safe_prompt = re.sub(r'[^\w\s-]', '', report.prompt)[:30].strip()
         safe_prompt = re.sub(r'[-\s]+', '_', safe_prompt)
         timestamp = report.timestamp.split('T')[0].replace('-', '')
 
         filename = f"tree_{timestamp}_{safe_prompt}.html"
-        output_path = self.output_dir / filename
+        output_path = output_dir / filename
 
-        self.export_to_html(report, str(output_path))
+        # Read template and substitute variables
+        template_content = self.template_path.read_text(encoding='utf-8')
+        html_content = template_content.format(
+            title=f"Tree: {report.prompt[:50]}...",
+            tree_data=TreeOperations.to_json(report.root)
+        )
+
+        output_path.write_text(html_content, encoding='utf-8')
         return str(output_path)
 
 
