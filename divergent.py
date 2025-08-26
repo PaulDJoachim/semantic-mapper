@@ -7,6 +7,7 @@ from semantic_embedding.embedding_provider import EmbeddingProvider
 from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
 from config.config import get_config
 from reporting.analysis_report import AnalysisReport
+from visualization.embedding_to_3d import EmbeddingTo3D
 from sklearn.decomposition import PCA
 
 
@@ -95,10 +96,15 @@ class DivergentGenerator:
                                                          top_p,
                                                          max_stems_per_node))
 
+
+
                 if print_stems:
                     self._print_stems(stem_texts, branch_node, prompt)
 
                 print(f"Node at depth {branch_node.depth}: {total_generated} stems -> {clustering_result.num_clusters} clusters")
+
+                viz_data = EmbeddingTo3D.create_visualization_data(clustering_result, stem_texts)
+                branch_node.cluster_data = viz_data
 
                 representatives = self.cluster_analyzer.get_cluster_representatives(
                     stem_tokens, clustering_result
