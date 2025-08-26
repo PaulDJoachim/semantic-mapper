@@ -34,6 +34,22 @@ class MockTensor:
             return self.data[index]
         return MockTensor(self.data[index])
 
+    def __add__(self, other):
+        """Support concatenation with other MockTensors or lists."""
+        if isinstance(other, MockTensor):
+            return MockTensor(self.data + other.data)
+        elif isinstance(other, list):
+            return MockTensor(self.data + other)
+        else:
+            raise TypeError(f"Cannot add MockTensor and {type(other)}")
+
+    def __radd__(self, other):
+        """Support left-side addition (list + MockTensor)."""
+        if isinstance(other, list):
+            return MockTensor(other + self.data)
+        else:
+            raise TypeError(f"Cannot add {type(other)} and MockTensor")
+
 
 def mock_cat(tensors: List[MockTensor], dim: int = 1) -> MockTensor:
     """Concatenate mock tensors."""
@@ -66,7 +82,7 @@ class MockModel(ModelInterface):
         self.custom_responses = {}
         if mode == "custom":
             self._load_custom_responses()
-    
+
     def _build_vocabulary(self):
         """Build semantic vocabulary groups."""
         self.semantic_groups = {
