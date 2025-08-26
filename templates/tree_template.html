@@ -13,17 +13,22 @@
             color: #ffffff;
             display: flex;
             gap: 20px;
+            height: calc(100vh - 40px);
         }}
 
         #tree-container {{
             flex: 1;
             min-width: 600px;
+            display: flex;
+            flex-direction: column;
         }}
 
         #canvas {{
             border: 1px solid #444;
             background: #000;
             cursor: grab;
+            flex: 1;
+            width: 100%;
         }}
 
         #canvas:active {{
@@ -70,12 +75,52 @@
             border-left: 3px solid;
         }}
 
+        .cluster-group {{
+            margin-bottom: 15px;
+            border: 1px solid #555;
+            border-radius: 6px;
+            overflow: hidden;
+        }}
+
+        .cluster-header {{
+            background: #333;
+            padding: 12px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+        }}
+
+        .cluster-header:hover {{
+            background: #3a3a3a;
+        }}
+
+        .cluster-content {{
+            padding: 8px;
+            background: #2a2a2a;
+        }}
+
+        .cluster-content.collapsed {{
+            display: none;
+        }}
+
+        .expand-icon {{
+            transition: transform 0.2s;
+        }}
+
+        .expand-icon.collapsed {{
+            transform: rotate(-90deg);
+        }}
+
         .controls {{
             margin-bottom: 20px;
             display: flex;
             align-items: center;
             gap: 20px;
             flex-wrap: wrap;
+            flex-shrink: 0;
         }}
 
         .control-group {{
@@ -129,7 +174,7 @@
             <button id="resetView">Reset View</button>
         </div>
 
-        <canvas id="canvas" width="800" height="600"></canvas>
+        <canvas id="canvas"></canvas>
     </div>
 
     <div id="cluster-panel">
@@ -181,7 +226,9 @@
 
                 const rect = this.canvas.getBoundingClientRect();
                 this.camera = new THREE.PerspectiveCamera(75, rect.width / rect.height, 0.1, 1000);
-                this.camera.position.set(2, 1, 2);
+
+                // Start with a better initial camera position
+                this.resetCamera();
 
                 this.renderer = new THREE.WebGLRenderer({{ canvas: this.canvas, antialias: true }});
                 this.renderer.setSize(rect.width, rect.height);
@@ -210,14 +257,21 @@
                 this.animate();
             }}
 
+            resetCamera() {{
+                // Position camera to look at origin from a good angle
+                this.camera.position.set(1.5, 1.0, 1.5);
+                this.camera.lookAt(0, 0, 0);
+            }}
+
             setupControls() {{
                 if (!this.renderer) return;
 
                 let isDragging = false;
                 let previousMouse = {{ x: 0, y: 0 }};
 
-                this.canvas.addEventListener('mousedown', () => {{
+                this.canvas.addEventListener('mousedown', (e) => {{
                     isDragging = false;
+                    previousMouse = {{ x: e.offsetX, y: e.offsetY }};
                 }});
 
                 this.canvas.addEventListener('mousemove', (e) => {{
@@ -228,17 +282,27 @@
                             y: e.offsetY - previousMouse.y
                         }};
 
-                        const deltaRotationQuaternion = new THREE.Quaternion()
-                            .setFromEuler(new THREE.Euler(
-                                deltaMove.y * 0.01,
-                                deltaMove.x * 0.01,
-                                0,
-                                'XYZ'
-                            ));
+                        // Orbit around the origin
+                        const spherical = new THREE.Spherical();
+                        spherical.setFromVector3(this.camera.position);
 
-                        this.camera.quaternion.multiplyQuaternions(deltaRotationQuaternion, this.camera.quaternion);
+                        spherical.theta -= deltaMove.x * 0.01;
+                        spherical.phi += deltaMove.y * 0.01;
+
+                        // Clamp phi to avoid flipping
+                        spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+
+                        this.camera.position.setFromSpherical(spherical);
+                        this.camera.lookAt(0, 0, 0);
                     }}
                     previousMouse = {{ x: e.offsetX, y: e.offsetY }};
+                }});
+
+                this.canvas.addEventListener('wheel', (e) => {{
+                    e.preventDefault();
+                    const distance = this.camera.position.length();
+                    const newDistance = Math.max(0.5, Math.min(5, distance + e.deltaY * 0.01));
+                    this.camera.position.normalize().multiplyScalar(newDistance);
                 }});
             }}
 
@@ -271,6 +335,9 @@
                     sphere.position.copy(endPoint);
                     this.sphereGroup.add(sphere);
                 }});
+
+                // Reset camera to center the new clusters
+                this.resetCamera();
             }}
 
             clear() {{
@@ -301,8 +368,8 @@
                 this.clusterViewer = null;
 
                 this.viewState = {{
-                    offsetX: canvas.width / 2,
-                    offsetY: canvas.height / 2,
+                    offsetX: 0,
+                    offsetY: 0,
                     zoom: 1,
                     nodeScale: 1,
                     layout: 'radial'
@@ -310,20 +377,46 @@
 
                 this.nodes = [];
                 this.edges = [];
+                this.expandedNodes = new Set(); // Track expanded nodes
                 this.nodeDimensionsCache = new Map();
 
+                this.setupCanvas();
                 this.setupEventListeners();
                 this.processTree();
                 this.render();
-                this.initClusterViewer();
+            }}
+
+            setupCanvas() {{
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+            }}
+
+            resizeCanvas() {{
+                const container = document.getElementById('tree-container');
+                const controls = document.querySelector('.controls');
+                const availableWidth = container.clientWidth;
+                const availableHeight = container.clientHeight - controls.offsetHeight - 40; // padding
+
+                this.canvas.width = availableWidth;
+                this.canvas.height = availableHeight;
+
+                // Center the view on resize
+                this.viewState.offsetX = availableWidth / 2;
+                this.viewState.offsetY = availableHeight / 2;
+
+                this.nodeDimensionsCache.clear();
+                this.render();
             }}
 
             initClusterViewer() {{
-                const canvas3d = document.getElementById('cluster-viewer');
-                this.clusterViewer = new ClusterVisualizer(canvas3d, {{
-                    fullscreen: false,
-                    autoRotate: true
-                }});
+                if (!this.clusterViewer) {{
+                    const canvas3d = document.getElementById('cluster-viewer');
+                    this.clusterViewer = new ClusterVisualizer(canvas3d, {{
+                        fullscreen: false,
+                        autoRotate: true
+                    }});
+                }}
+                return this.clusterViewer;
             }}
 
             setupEventListeners() {{
@@ -361,6 +454,21 @@
                     }}
                     isDragging = false;
                     dragStarted = false;
+                }});
+
+                // Mouse wheel zoom
+                this.canvas.addEventListener('wheel', (e) => {{
+                    e.preventDefault();
+                    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+                    const newZoom = Math.max(0.1, Math.min(3, this.viewState.zoom * zoomFactor));
+
+                    if (newZoom !== this.viewState.zoom) {{
+                        this.viewState.zoom = newZoom;
+                        document.getElementById('zoomSlider').value = newZoom;
+                        document.getElementById('zoomValue').textContent = newZoom.toFixed(1);
+                        this.nodeDimensionsCache.clear();
+                        this.render();
+                    }}
                 }});
 
                 document.getElementById('zoomSlider').addEventListener('input', (e) => {{
@@ -410,6 +518,17 @@
                     const bottom = screen.y + dimensions.height / 2;
 
                     if (clickX >= left && clickX <= right && clickY >= top && clickY <= bottom) {{
+                        // Toggle expansion for long text
+                        if (node.text.length > 25) {{
+                            if (this.expandedNodes.has(node.id)) {{
+                                this.expandedNodes.delete(node.id);
+                            }} else {{
+                                this.expandedNodes.add(node.id);
+                            }}
+                            this.nodeDimensionsCache.clear();
+                            this.render();
+                        }}
+
                         this.selectNode(node);
                         break;
                     }}
@@ -438,18 +557,59 @@
                     .join('');
                 document.getElementById('cluster-stats').innerHTML = `<div class="cluster-info">${{statsHtml}}</div>`;
 
-                const samplesHtml = node.cluster_data.samples.slice(0, 8)
-                    .map(sample => `<div class="sample-text" style="border-left-color: ${{sample.color}}">${{sample.text}}</div>`)
-                    .join('');
-                document.getElementById('cluster-samples').innerHTML = samplesHtml;
+                // Group samples by cluster
+                const clusterGroups = {{}};
+                node.cluster_data.samples.forEach(sample => {{
+                    const clusterId = sample.cluster;
+                    const clusterKey = clusterId === -1 ? 'noise' : `cluster_${{clusterId}}`;
+                    if (!clusterGroups[clusterKey]) {{
+                        clusterGroups[clusterKey] = [];
+                    }}
+                    clusterGroups[clusterKey].push(sample);
+                }});
 
-                this.clusterViewer.showClusters(node.cluster_data);
+                // Generate collapsible HTML
+                const clustersHtml = Object.entries(clusterGroups)
+                    .sort(([a], [b]) => {{
+                        // Sort: numbered clusters first, then noise
+                        if (a === 'noise') return 1;
+                        if (b === 'noise') return -1;
+                        return a.localeCompare(b);
+                    }})
+                    .map(([clusterKey, samples]) => {{
+                        const displayName = clusterKey === 'noise' ? 'Noise' : clusterKey.replace('_', ' ');
+                        const sampleCount = samples.length;
+
+                        const samplesHtml = samples
+                            .map(sample => `<div class="sample-text" style="border-left-color: ${{sample.color}}">${{sample.text}}</div>`)
+                            .join('');
+
+                        return `
+                            <div class="cluster-group">
+                                <div class="cluster-header" onclick="toggleCluster('${{clusterKey}}')">
+                                    <span>${{displayName}} (${{sampleCount}} samples)</span>
+                                    <span class="expand-icon" id="icon-${{clusterKey}}">▼</span>
+                                </div>
+                                <div class="cluster-content" id="content-${{clusterKey}}">
+                                    ${{samplesHtml}}
+                                </div>
+                            </div>
+                        `;
+                    }})
+                    .join('');
+
+                document.getElementById('cluster-samples').innerHTML = clustersHtml;
+
+                const viewer = this.initClusterViewer();
+                viewer.showClusters(node.cluster_data);
             }}
 
             hideClusterData() {{
                 document.getElementById('no-selection').classList.remove('hidden');
                 document.getElementById('cluster-content').classList.add('hidden');
-                this.clusterViewer.clear();
+                if (this.clusterViewer) {{
+                    this.clusterViewer.clear();
+                }}
             }}
 
             screenToWorld(screenX, screenY) {{
@@ -557,7 +717,9 @@
             }}
 
             getNodeDimensions(node) {{
-                const cacheKey = `${{node.id}}-${{this.viewState.zoom}}-${{this.viewState.nodeScale}}`;
+                const isExpanded = this.expandedNodes.has(node.id);
+                const cacheKey = `${{node.id}}-${{this.viewState.zoom}}-${{this.viewState.nodeScale}}-${{isExpanded}}`;
+
                 if (this.nodeDimensionsCache.has(cacheKey)) {{
                     return this.nodeDimensionsCache.get(cacheKey);
                 }}
@@ -569,8 +731,10 @@
                 this.ctx.font = `${{fontSize}}px Arial`;
 
                 let displayText = node.text.trim();
-                const charLimit = Math.floor(15 + (zoomScale * 25));
-                if (displayText.length > charLimit) {{
+                const hasLongText = displayText.length > 25;
+
+                if (!isExpanded && hasLongText) {{
+                    const charLimit = Math.floor(15 + (zoomScale * 10));
                     displayText = displayText.substring(0, charLimit) + '...';
                 }}
 
@@ -579,7 +743,16 @@
                 const width = Math.max(textWidth + padding * 2, 60 * baseScale);
                 const height = Math.max(fontSize + padding * 2, 40 * baseScale);
 
-                const dimensions = {{ width, height, padding, fontSize, displayText }};
+                const dimensions = {{
+                    width,
+                    height,
+                    padding,
+                    fontSize,
+                    displayText,
+                    isExpanded,
+                    hasLongText
+                }};
+
                 this.nodeDimensionsCache.set(cacheKey, dimensions);
                 return dimensions;
             }}
@@ -625,7 +798,7 @@
 
             drawNode(x, y, node) {{
                 const dimensions = this.getNodeDimensions(node);
-                const {{ width, height, padding, fontSize, displayText }} = dimensions;
+                const {{ width, height, padding, fontSize, displayText, isExpanded, hasLongText }} = dimensions;
 
                 const rectX = x - width / 2;
                 const rectY = y - height / 2;
@@ -664,6 +837,13 @@
                     this.ctx.textAlign = 'center';
                     this.ctx.textBaseline = 'middle';
                     this.ctx.fillText(displayText, x, y);
+
+                    // Show expand indicator for long text
+                    if (hasLongText && !isExpanded && this.viewState.zoom > 0.5) {{
+                        this.ctx.fillStyle = '#aaaaaa';
+                        this.ctx.font = `${{Math.max(8, fontSize * 0.7)}}px Arial`;
+                        this.ctx.fillText('⋯', x + width/2 - 15, y - height/2 + 12);
+                    }}
                 }}
             }}
 
@@ -684,6 +864,17 @@
 
         const canvas = document.getElementById('canvas');
         const visualizer = new TreeVisualizer(canvas, treeData);
+
+        // Global function for collapsible clusters
+        function toggleCluster(clusterKey) {{
+            const content = document.getElementById(`content-${{clusterKey}}`);
+            const icon = document.getElementById(`icon-${{clusterKey}}`);
+
+            if (content && icon) {{
+                content.classList.toggle('collapsed');
+                icon.classList.toggle('collapsed');
+            }}
+        }}
     </script>
 </body>
 </html>
