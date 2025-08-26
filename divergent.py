@@ -29,6 +29,27 @@ class DivergentGenerator:
         if hasattr(self.model, 'set_seed'):
             self.model.set_seed(seed)
 
+    def _create_child_branches(self, parent_node: TreeNode, branch_sequence: Any,
+                               representatives: List[Any], stem_length: int) -> List[Tuple[TreeNode, Any]]:
+        """Create child nodes and new branch sequences from cluster representatives."""
+        new_branches = []
+
+        # TODO replace with an actual probability distribution
+        probability = 1.0 / len(representatives) if len(representatives) > 1 else 1.0
+
+        for rep_tokens in representatives:
+            child_text = self.model.decode(rep_tokens)
+            child = TreeNode(
+                token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
+                token_text=child_text, probability=probability,
+                depth=parent_node.depth + stem_length)
+            parent_node.add_child(child)
+
+            new_sequence = branch_sequence + rep_tokens
+            new_branches.append((child, new_sequence))
+
+        return new_branches
+
     def explore_topology(self, prompt: str,
                          max_depth: int = None,
                          stem_length: int = None,
@@ -65,7 +86,6 @@ class DivergentGenerator:
                     new_branches.append((branch_node, branch_sequence))
                     continue
 
-                # Generate stems with dynamic sampling
                 stem_tokens, stem_texts, clustering_result, total_generated = (
                     self._generate_stems_until_clustered(branch_sequence,
                                                          num_stems,
@@ -75,52 +95,21 @@ class DivergentGenerator:
                                                          top_p,
                                                          max_stems_per_node))
 
-                # Print stems if requested
                 if print_stems:
                     self._print_stems(stem_texts, branch_node, prompt)
 
                 print(f"Node at depth {branch_node.depth}: {total_generated} stems -> {clustering_result.num_clusters} clusters")
 
-                if clustering_result.has_branching:
-                    representatives = self.cluster_analyzer.get_cluster_representatives(
-                        stem_tokens, clustering_result
+                representatives = self.cluster_analyzer.get_cluster_representatives(
+                    stem_tokens, clustering_result
+                )
+
+                if representatives:
+                    child_branches = self._create_child_branches(
+                        branch_node, branch_sequence, representatives, stem_length
                     )
-
-                    for rep_tokens in representatives:
-                        # Create child node with representative stem
-                        child_text = self.model.decode(rep_tokens)
-                        child = TreeNode(
-                            token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
-                            token_text=child_text,
-                            probability=1.0 / len(representatives),
-                            depth=branch_node.depth + stem_length
-                        )
-                        branch_node.add_child(child)
-
-                        # Create new sequence for this branch
-                        new_sequence = branch_sequence + rep_tokens
-                        new_branches.append((child, new_sequence))
-                        total_nodes += 1
-                else:
-                    # No semantic branching - continue with single representative
-                    representatives = self.cluster_analyzer.get_cluster_representatives(
-                        stem_tokens, clustering_result
-                    )
-
-                    if representatives:
-                        rep_tokens = representatives[0]
-                        child_text = self.model.decode(rep_tokens)
-                        child = TreeNode(
-                            token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
-                            token_text=child_text,
-                            probability=1.0,
-                            depth=branch_node.depth + stem_length
-                        )
-                        branch_node.add_child(child)
-
-                        new_sequence = branch_sequence + rep_tokens
-                        new_branches.append((child, new_sequence))
-                        total_nodes += 1
+                    new_branches.extend(child_branches)
+                    total_nodes += len(child_branches)
 
             active_branches = new_branches
 
