@@ -29,43 +29,6 @@ This is very much a work in progress. The basic pipeline functions and can:
 - Data output is sparse at the moment. Could use more comprehensive stats.
 - Limited testing on different model types and prompt categories
 
-## Architecture
-
-### Core Pipeline
-
-- `divergent.py`: Main generation engine that orchestrates the semantic branching exploration
-- `models/model_interface.py`: Abstract interface with factory functions for different language models
-- `tree_utils.py`: Tree data structures (`TreeNode`) and operations (`TreeOperations`)
-
-### Model Implementations
-
-- `models/gpt_two.py`: GPT-2 interface with batched stem generation and sampling controls
-- `models/mock_model.py`: Testing model that generates semantically clusterable stems
-
-### Semantic Analysis
-
-- `semantic_embedding/embedding_provider.py`: Abstract interface for text embeddings
-- `semantic_embedding/sentence_embedding.py`: Sentence transformer implementation
-- `semantic_embedding/mock_embedding.py`: Deterministic mock embeddings for testing
-- `clustering/cluster_analyzer.py`: Abstract clustering interface with result structures
-- `clustering/dbscan_clustering.py`: DBSCAN-based semantic clustering
-- `clustering/hierarchical_clustering.py`: Hierarchical clustering implementation
-
-### Visualization & Output
-
-- `visualization/visualization.py`: HTML export and text-based tree printing
-- `visualization/embedding_to_3d.py`: Converts high-dimensional embeddings to 3D PCA projections
-- `templates/tree_template.html`: Interactive web visualization with 3D cluster viewer
-- `reporting/analysis_report.py`: Comprehensive analysis results with JSON export
-
-### Configuration & Utilities
-
-- `config/config.py`: Centralized configuration management with automatic file discovery
-- `config/config.ini`: Parameter settings for generation, clustering, and visualization
-- `main.py`: Example usage and pipeline orchestration
-
-This is experimental software. If you find it useful or have ideas for improvement, contributions are welcome.
-
 ## Possible Use Cases
 
 - **Security research**: Identifying potential jailbreak vectors or unintended model behaviors
@@ -84,7 +47,8 @@ Edit `config.ini` to adjust:
 - Generation parameters (temperature, top-k, top-p)
 - Clustering sensitivity (eps, minimum cluster size)
 - Visualization options
-  TODO - more detail about config settings
+
+TODO - more detail about config settings
 
 ## Architecture
 
@@ -118,6 +82,8 @@ Edit `config.ini` to adjust:
 - `config/config.py`: Centralized configuration management with automatic file discovery
 - `config/config.ini`: Parameter settings for generation, clustering, and visualization
 - `main.py`: Example usage and pipeline orchestration
+
+This is experimental software. If you find it useful or have ideas for improvement, contributions are welcome.
 
 ## Why This Matters
 
