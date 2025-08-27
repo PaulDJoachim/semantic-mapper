@@ -61,6 +61,9 @@ def get_grouper(clustering_type: str = None, **kwargs):
     elif clustering_type == "dbscan":
         from clustering.dbscan_clustering import DBSCANClusterAnalyzer
         cluster_analyzer = DBSCANClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
+    elif clustering_type == "hierarchical":
+        from clustering.hierarchical_clustering import HierarchicalAnalyzer
+        cluster_analyzer = HierarchicalAnalyzer(**kwargs.get('cluster_kwargs', {}))
     else:
         raise ValueError(f"Unknown clustering type: {clustering_type}")
 

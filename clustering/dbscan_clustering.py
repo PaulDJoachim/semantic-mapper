@@ -11,11 +11,9 @@ class DBSCANClusterAnalyzer(ClusterAnalyzer):
 
     def __init__(self, eps: float = None, min_sample_ratio: float = None, min_clusters: int = None):
         config = get_config()
-        self.eps = eps if eps is not None else config.getfloat("clustering", "eps")
-        self.min_sample_ratio = (min_sample_ratio if min_sample_ratio is not None 
-                               else config.getfloat("clustering", "min_sample_ratio"))
-        self.min_clusters = (min_clusters if min_clusters is not None 
-                           else config.getint("clustering", "min_clusters"))
+        self.eps = config.getfloat("DBSCAN-clustering", "eps")
+        self.min_sample_ratio = config.getfloat("clustering", "min_sample_ratio")
+        self.min_clusters = config.getint("clustering", "min_clusters")
 
     def analyze_clusters(self, embeddings: np.ndarray) -> ClusteringResult:
         """Cluster embeddings using DBSCAN."""
