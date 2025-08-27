@@ -9,11 +9,10 @@ from sklearn.metrics.pairwise import cosine_distances
 class DBSCANClusterAnalyzer(ClusterAnalyzer):
     """DBSCAN-based clustering analyzer."""
 
-    def __init__(self, eps: float = None, min_sample_ratio: float = None, min_clusters: int = None):
+    def __init__(self):
         config = get_config()
         self.eps = config.getfloat("DBSCAN-clustering", "eps")
         self.min_sample_ratio = config.getfloat("clustering", "min_sample_ratio")
-        self.min_clusters = config.getint("clustering", "min_clusters")
 
     def analyze_clusters(self, embeddings: np.ndarray) -> ClusteringResult:
         """Cluster embeddings using DBSCAN."""
@@ -27,7 +26,7 @@ class DBSCANClusterAnalyzer(ClusterAnalyzer):
         labels = clustering.fit_predict(embeddings)
 
         num_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-        has_branching = num_clusters >= self.min_clusters
+        has_branching = num_clusters >= 2
 
         return ClusteringResult(
             labels=labels.tolist(),
