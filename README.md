@@ -4,9 +4,9 @@ A work-in-progress tool for exploring the semantic branching behavior of languag
 
 ## What This Does
 
-Most language model interfaces show you the single "best" continuation from any given prompt. DIA takes a different approach: it generates many possible continuations, clusters them semantically, and builds a tree structure that reveals where the model's reasoning genuinely diverges.
+Language model interfaces are typically optimized to produce a single "best" continuation from any given prompt. DIA attempts to identify conditions under which this optimzation fails: it generates many possible continuations, clusters them semantically, and builds a tree structure that reveals where the model's reasoning genuinely diverges toward multiple strong attractors.
 
-This is based on the hypothesis that consumer-tuned models may still contain latent capabilities for multiple, semantically conflicting inference chains - even if those chains are buried under safety training or preference optimization. By sampling broadly and clustering semantically similar continuations, we can potentially surface these alternative reasoning paths.
+This is based on the hypothesis that consumer-tuned models may still contain latent capabilities for statistically significant yet semantically conflicting inference chains - even if those chains are buried under safety training or preference optimization. By sampling broadly and clustering semantically similar continuations, we can potentially surface these alternative reasoning paths.
 
 ![Example Image](./images/example_img.png)
 
@@ -15,18 +15,54 @@ This is based on the hypothesis that consumer-tuned models may still contain lat
 This is very much a work in progress. The basic pipeline functions and can:
 
 - Generate multiple continuation "stems" from branching points
-- Use sentence embeddings to cluster semantically similar continuations
+- Create embeddings of stems using a sentence transformer model
+- Cluster embeddings using a clustering algorhythm (DBSCAN or Heirarchical currently)
 - Build an interactive tree visualization showing where semantic divergence is detected
+- Display the stem clustering of each node as a 3D PCA projection, along with the text of all stems in the cluster.
 
 ## Limitations and TODOs
 
 - Only tested on GPT-2 models, which aren't really intelligent enough to function as an actual proof of concept. (larger models will need better memory management)
 - Clustering parameters need tuning for different domains.
 - Currently no quantitative metrics for "semantic divergence". Debatable as to whether or not sentence embeddings constitute a valid evaluation of meaning.
-- DBSCAN algorithm might be sub-optimal for quantifying embedding similarity.
 - Visualization is bare-bones and could use more features/polish
-- Data output is sparse at the moment. Could use JSON reports with more comprehensive stats.
+- Data output is sparse at the moment. Could use more comprehensive stats.
 - Limited testing on different model types and prompt categories
+
+## Architecture
+
+### Core Pipeline
+
+- `divergent.py`: Main generation engine that orchestrates the semantic branching exploration
+- `models/model_interface.py`: Abstract interface with factory functions for different language models
+- `tree_utils.py`: Tree data structures (`TreeNode`) and operations (`TreeOperations`)
+
+### Model Implementations
+
+- `models/gpt_two.py`: GPT-2 interface with batched stem generation and sampling controls
+- `models/mock_model.py`: Testing model that generates semantically clusterable stems
+
+### Semantic Analysis
+
+- `semantic_embedding/embedding_provider.py`: Abstract interface for text embeddings
+- `semantic_embedding/sentence_embedding.py`: Sentence transformer implementation
+- `semantic_embedding/mock_embedding.py`: Deterministic mock embeddings for testing
+- `clustering/cluster_analyzer.py`: Abstract clustering interface with result structures
+- `clustering/dbscan_clustering.py`: DBSCAN-based semantic clustering
+- `clustering/hierarchical_clustering.py`: Hierarchical clustering implementation
+
+### Visualization & Output
+
+- `visualization/visualization.py`: HTML export and text-based tree printing
+- `visualization/embedding_to_3d.py`: Converts high-dimensional embeddings to 3D PCA projections
+- `templates/tree_template.html`: Interactive web visualization with 3D cluster viewer
+- `reporting/analysis_report.py`: Comprehensive analysis results with JSON export
+
+### Configuration & Utilities
+
+- `config/config.py`: Centralized configuration management with automatic file discovery
+- `config/config.ini`: Parameter settings for generation, clustering, and visualization
+- `main.py`: Example usage and pipeline orchestration
 
 This is experimental software. If you find it useful or have ideas for improvement, contributions are welcome.
 
@@ -52,11 +88,36 @@ Edit `config.ini` to adjust:
 
 ## Architecture
 
-- `model_interface.py`: Abstraction layer for different language models
-- `embedding_analyzer.py`: Semantic clustering using sentence transformers
-- `tree_utils.py`: Core tree data structures and operations
-- `visualization.py`: Interactive HTML tree visualization
-- `divergent.py`: Main generation pipeline
+#### Core Pipeline
+
+- `divergent.py`: Main generation engine that orchestrates the semantic branching exploration
+- `models/model_interface.py`: Abstract interface with factory functions for different language models
+- `tree_utils.py`: Tree data structures (`TreeNode`) and operations (`TreeOperations`)
+
+#### Model Implementations
+
+- `models/gpt_two.py`: GPT-2 interface with batched stem generation and sampling controls
+
+#### Semantic Analysis
+
+- `semantic_embedding/embedding_provider.py`: Abstract interface for text embeddings
+- `semantic_embedding/sentence_embedding.py`: Sentence transformer implementation
+- `clustering/cluster_analyzer.py`: Abstract clustering interface with result structures
+- `clustering/dbscan_clustering.py`: DBSCAN-based semantic clustering
+- `clustering/hierarchical_clustering.py`: Hierarchical clustering implementation
+
+#### Visualization & Output
+
+- `visualization/visualization.py`: HTML export and text-based tree printing
+- `visualization/embedding_to_3d.py`: Converts high-dimensional embeddings to 3D PCA projections
+- `templates/tree_template.html`: Interactive web visualization with 3D cluster viewer
+- `reporting/analysis_report.py`: Comprehensive analysis results with JSON export
+
+#### Configuration & Utilities
+
+- `config/config.py`: Centralized configuration management with automatic file discovery
+- `config/config.ini`: Parameter settings for generation, clustering, and visualization
+- `main.py`: Example usage and pipeline orchestration
 
 ## Why This Matters
 
