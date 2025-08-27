@@ -8,11 +8,11 @@ class EmbeddingTo3D:
     """Convert high-dimensional embeddings to 3D positions for visualization."""
 
     CLUSTER_COLORS = [
-        '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4',
+        '#ff6b6b', '#96e338', '#45b7d1', '#96ceb4',
         '#fd79a8', '#fdcb6e', '#e17055', '#74b9ff',
         '#a29bfe', '#6c5ce7'
     ]
-    NOISE_COLOR = '#ffeaa7'
+    NOISE_COLOR = '#c1bbb9'
 
     @staticmethod
     def create_visualization_data(clustering_result: ClusteringResult,
