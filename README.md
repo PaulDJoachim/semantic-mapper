@@ -14,22 +14,26 @@ This is based on the hypothesis that consumer-tuned models may still contain lat
 
 ## Current State
 
-This is very much a work in progress. The basic pipeline functions and can:
+This is very much a work in progress. The basic pipeline functions and will:
 
-- Generate multiple continuation "stems" from branching points
-- Create embeddings of stems using a sentence transformer model
-- Cluster embeddings using a clustering algorhythm (DBSCAN or Heirarchical currently)
-- Build an interactive tree visualization showing where semantic divergence is detected
-- Display the stem clustering of each node as a 3D PCA projection, along with the text of all stems in the cluster.
+- Recursively generate multiple continuation "stems" and nodes from an initial prompt
+- Prune stems based on abrupt jumps in token entropy
+- Create semantic embeddings of stems using a sentence transformer model
+- Group stem embeddings using a clustering algorhythm (DBSCAN or Heirarchical currently)
+- Select cluster representitives for continuation or branching
+- Build an interactive html visualization showing where semantic divergence is detected
+- Display the stem clustering of each node as a 3D PCA projection, along with the text of all stems in each cluster
 
 ## Limitations and TODOs
 
 - Only tested on GPT-2 models, which aren't really intelligent enough to function as an actual proof of concept. (larger models will need better memory management)
-- Clustering parameters need tuning for different domains.
-- Currently no quantitative metrics for "semantic divergence". Debatable as to whether or not sentence embeddings constitute a valid evaluation of meaning.
-- Visualization is bare-bones and could use more features/polish
-- Data output is sparse at the moment. Could use more comprehensive stats.
+- Inference, embedding, and clustering parameters need tuning for usable results in different prompts/domains
+- Currently no quantitative metrics for "semantic divergence". Debatable as to whether or not sentence embeddings constitute a valid evaluation of meaning
+- Depth-triggered branch clustering should be tested to validate semantic divergence is non-trival (and to reduce redundundant branching)
+- Visualization is rudimentary and could use more QoL features/polish
+- Data output is sparse at the moment. Could use more comprehensive stats
 - Limited testing on different model types and prompt categories
+- There are many places that could benefit from optimization and refactoring
 
 ## Possible Use Cases
 
