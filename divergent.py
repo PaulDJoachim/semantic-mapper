@@ -212,18 +212,19 @@ class DivergentGenerator:
             search_start = min_length
             search_entropies = entropy_sequence[search_start:]
 
-            if not search_entropies:
+            if not search_entropies or len(search_entropies) <= 1:
                 # No search range, keep full stem
                 pruned_stems.append(stem)
                 continue
 
             # TODO test using a moving average of entropy to filter out noise
-            # Find the index of maximum entropy in the search range
-            peak_idx_in_range = np.argmax(search_entropies)
-            peak_idx = search_start + peak_idx_in_range
+            # Find largest entropy jump in the search range
+            entropy_diffs = np.diff(search_entropies)
+            max_jump_idx_in_range = np.argmax(entropy_diffs)
 
-            # Prune stem at the entropy peak (inclusive)
-            pruned_stem = stem[:peak_idx + 1]
+            # Prune stem before largest entropy jump in range
+            cut_idx = search_start + max_jump_idx_in_range + 1
+            pruned_stem = stem[:cut_idx]
             pruned_stems.append(pruned_stem)
 
         return pruned_stems
