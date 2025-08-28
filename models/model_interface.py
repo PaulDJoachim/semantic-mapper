@@ -18,10 +18,9 @@ class ModelInterface(ABC):
 
     @abstractmethod
     def generate_stems(self, input_ids: Any, num_stems: int, stem_length: int,
-                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[Tuple[List[int], Any]]:
-        """Return stems as (token_list, hidden_state) pairs"""
+                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[List[int]]:
+        """Return stems as lists of token IDs"""
         pass
-
 
 def get_model(model_name: str = None, **kwargs) -> ModelInterface:
     """Create model instance of specified type."""

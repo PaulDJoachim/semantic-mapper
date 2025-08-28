@@ -112,8 +112,6 @@ class DivergentGenerator:
                                                          top_p,
                                                          max_stems_per_node))
 
-
-
                 if print_stems:
                     self._print_stems(stem_texts, branch_node, prompt)
 
@@ -165,12 +163,12 @@ class DivergentGenerator:
                                             temperature=temperature, top_k=top_k, top_p=top_p)
 
             # Extract tokens, texts, and embeddings
-            batch_tokens = [stem[0] for stem in stems]
-            batch_texts = [self.model.decode(tokens) for tokens in batch_tokens]
+
+            batch_texts = [self.model.decode(tokens) for tokens in stems]
             batch_embeddings = self.embedding_provider.get_embeddings(batch_texts)
 
             # Add to accumulated results
-            all_stem_tokens.extend(batch_tokens)
+            all_stem_tokens.extend(stems)
             all_stem_texts.extend(batch_texts)
 
             if all_stem_embeddings is None:

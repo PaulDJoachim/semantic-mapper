@@ -158,9 +158,8 @@ class MockModel(ModelInterface):
                 tokens = self._generate_custom_stem(input_ids, stem_length)
             else:
                 tokens = self._generate_random_stem(stem_length)
-            
-            hidden_state = mock_randn(768)
-            stems.append((MockTensor(tokens), hidden_state))
+
+            stems.append((MockTensor(tokens)))
         
         return stems
 

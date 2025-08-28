@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from models.model_interface import ModelInterface
 from config.config import get_config
@@ -11,6 +10,7 @@ class GPT2Interface(ModelInterface):
 
     def __init__(self, model_name: str, device: str = None):
         config = get_config()
+        self.set_seed(config.getint("generation", "seed"))
 
         self.device = torch.device(
             device or config.device if torch.cuda.is_available() else "cpu"
@@ -21,10 +21,12 @@ class GPT2Interface(ModelInterface):
         self.model = GPT2LMHeadModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
 
-        # Set pad token
-        pad_token_mode = config.get("model", "pad_token_mode", "eos")
-        if pad_token_mode == "eos":
-            self.tokenizer.pad_token = self.tokenizer.eos_token
+        # Set pad token to be different from eos token to avoid attention mask issues
+        self.tokenizer.pad_token = self.tokenizer.unk_token  # Use unk token as pad
+        if self.tokenizer.pad_token is None:
+            # If no unk token, add a new pad token
+            self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+            self.model.resize_token_embeddings(len(self.tokenizer))
 
     def set_seed(self, seed: int) -> None:
         """Set model-specific random seed."""
@@ -44,40 +46,10 @@ class GPT2Interface(ModelInterface):
         """Decode single token ID to text."""
         return self.tokenizer.decode([token_id])
 
-    def apply_sampling_filters(self, logits: torch.Tensor, temperature: float = 1.0,
-                              top_k: int = 0, top_p: float = 1.0) -> torch.Tensor:
-        """Apply temperature, top_k, and top_p filtering to logits."""
-        # Apply temperature
-        if temperature != 1.0:
-            logits = logits / temperature
-
-        # Apply top_k filtering
-        if top_k > 0:
-            top_k = min(top_k, logits.size(-1))  # Safety check
-            indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-            logits[indices_to_remove] = float('-inf')
-
-        # Apply top_p (nucleus) filtering
-        if top_p < 1.0:
-            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-
-            # Remove tokens with cumulative probability above the threshold
-            sorted_indices_to_remove = cumulative_probs > top_p
-            # Shift the indices to the right to keep also the first token above the threshold
-            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-            sorted_indices_to_remove[..., 0] = 0
-
-            # Convert back to original indexing
-            indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-            logits[indices_to_remove] = float('-inf')
-
-        return logits
-
     def generate_stems(self, input_ids: List[int], num_stems: int, stem_length: int,
-                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[Tuple[List[int], torch.Tensor]]:
+                      temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> List[Tuple[List[int], Any]]:
         """
-        Generate multiple continuation stems using batched inference.
+        Generate multiple continuation stems using HuggingFace's optimized generate.
 
         Args:
             input_ids: List of input token IDs
@@ -88,68 +60,55 @@ class GPT2Interface(ModelInterface):
             top_p: Nucleus sampling threshold (1.0 = no filtering)
 
         Returns:
-            List of (generated_token_ids, final_hidden_state) tuples
+            List of generated token IDs (without hidden states since they're not used)
         """
+        # CRITICAL: Generate in smaller batches to avoid memory explosion
+        # HuggingFace's generate with num_return_sequences creates a huge attention tensor
         config = get_config()
-        batch_size = config.getint("generation", "batch_size", 50)
-
-        # Convert input list to tensor for model
-        input_tensor = torch.tensor([input_ids], device=self.device)
         stems = []
+        batch_size = config.getint("generation", "batch_size")
 
         with torch.no_grad():
             for batch_start in range(0, num_stems, batch_size):
-                batch_end = min(batch_start + batch_size, num_stems)
-                current_batch_size = batch_end - batch_start
 
-                # Create batch by repeating input_tensor
-                batch_input = input_tensor.repeat(current_batch_size, 1)
+                # Convert input to tensor and create attention mask
+                input_tensor = torch.tensor([input_ids], dtype=torch.long, device=self.device)
+                attention_mask = torch.ones_like(input_tensor, dtype=torch.long, device=self.device)
 
-                # Generate stems for this batch
-                for step in range(stem_length):
-                    outputs = self.model(batch_input, output_hidden_states=True)
-                    logits = outputs.logits[:, -1, :]
+                # Generate batch of stems
+                outputs = self.model.generate(
+                    input_ids=input_tensor,
+                    attention_mask=attention_mask,
+                    max_new_tokens=stem_length,
+                    min_new_tokens=stem_length,  # Force exact length
+                    num_return_sequences=batch_size,
+                    temperature=temperature if temperature > 0 else 1e-7,
+                    top_k=top_k if top_k > 0 else None,
+                    top_p=top_p if top_p < 1.0 else None,
+                    do_sample=True,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    return_dict_in_generate=False,
+                    use_cache=True,
+                )
 
-                    # Apply sampling filters
-                    filtered_logits = []
-                    for i in range(current_batch_size):
-                        filtered = self.apply_sampling_filters(
-                            logits[i:i+1], temperature, top_k, top_p
-                        )
-                        filtered_logits.append(filtered)
+                # Extract the generated portions
+                input_length = input_tensor.size(1)
+                generated_portions = outputs[:, input_length:]
 
-                    filtered_logits = torch.cat(filtered_logits, dim=0)
-                    probs = torch.softmax(filtered_logits, dim=-1)
-                    next_tokens = torch.multinomial(probs, 1)
-                    batch_input = torch.cat([batch_input, next_tokens], dim=1)
+                # Convert to list and add to results
+                for i in range(batch_size):
+                    generated_tokens = generated_portions[i].tolist()
+                    stems.append(generated_tokens)
 
-                # Extract generated portions as lists and final hidden states
-                for i in range(current_batch_size):
-                    generated_tokens = batch_input[i, input_tensor.size(1):].tolist()
-                    final_hidden = outputs.hidden_states[-1][i, -1, :]
-                    stems.append((generated_tokens, final_hidden))
+                # memory cleanup
+                del outputs
+                del generated_portions
+                del input_tensor
+                del attention_mask
+
+            # Force GPU memory cleanup after all batches
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         return stems
-
-    def get_sampling_info(self, temperature: float, top_k: int, top_p: float) -> str:
-        """Get a human-readable description of current sampling settings."""
-        parts = []
-        if temperature != 1.0:
-            if temperature < 0.5:
-                parts.append(f"very conservative (temp={temperature:.2f})")
-            elif temperature < 0.8:
-                parts.append(f"conservative (temp={temperature:.2f})")
-            elif temperature > 1.5:
-                parts.append(f"very creative (temp={temperature:.2f})")
-            elif temperature > 1.2:
-                parts.append(f"creative (temp={temperature:.2f})")
-            else:
-                parts.append(f"temp={temperature:.2f}")
-
-        if top_k > 0:
-            parts.append(f"top-{top_k}")
-
-        if top_p < 1.0:
-            parts.append(f"nucleus-{top_p:.2f}")
-
-        return "Sampling: " + (", ".join(parts) if parts else "default")
