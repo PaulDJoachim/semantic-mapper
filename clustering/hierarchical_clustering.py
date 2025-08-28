@@ -15,6 +15,7 @@ class HierarchicalAnalyzer(ClusterAnalyzer):
         self.min_sample_ratio = config.getfloat("clustering", "min_sample_ratio")
         self.linkage_criterion = config.get("hi-clustering", "linkage_criterion")
         self.cut_distance = config.getfloat("hi-clustering", "cut_distance")
+        self.force_cluster = config.getboolean("hi-clustering", "force_cluster")
 
     def analyze_clusters(self, embeddings: np.ndarray) -> ClusteringResult:
         """Cluster embeddings using hierarchical clustering."""
@@ -74,6 +75,13 @@ class HierarchicalAnalyzer(ClusterAnalyzer):
 
         print(f"All cluster sizes: {cluster_info}")
         print(f"Valid clusters: {valid_clusters}")
+
+        if not valid_clusters and self.force_cluster:
+            # TODO flag forced clusters in results somehow
+            print('No valid clusters found, returning largest cluster')
+            # Find the largest cluster
+            largest_label = max(cluster_info.items(), key=lambda x: x[1])[0]
+            valid_clusters = [largest_label]
 
         # Create new labels: valid clusters get new sequential IDs, small ones become noise (-1)
         filtered_labels = np.full(len(labels), -1, dtype=int)
