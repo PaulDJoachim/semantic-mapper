@@ -34,6 +34,10 @@ def get_model(model_name: str = None, **kwargs) -> ModelInterface:
         from models.gpt_two import GPT2Interface
         return GPT2Interface(model_name, **kwargs)
 
+    elif model_name == "microsoft/Phi-3.5-mini-instruct":
+        from models.phi_instruct import PhiInterface
+        return PhiInterface(model_name, **kwargs)
+
     else:
         raise ValueError(f"Unknown model: {model_name}")
 

@@ -1,12 +1,12 @@
 import torch
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from models.model_interface import ModelInterface
 from config.config import get_config
 from typing import List, Tuple, Any
 
 
-class GPT2Interface(ModelInterface):
-    """Interface wrapper for GPT-2 models with batched inference optimization."""
+class PhiInterface(ModelInterface):
+    """Interface wrapper for Phi-3.5-mini-instruct."""
 
     def __init__(self, model_name: str, device: str = None):
         config = get_config()
@@ -17,16 +17,12 @@ class GPT2Interface(ModelInterface):
         )
 
         model_name = model_name
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-        self.model = GPT2LMHeadModel.from_pretrained(model_name).to(self.device)
-        self.model.eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(model_name)
 
-        # Set pad token to be different from eos token to avoid attention mask issues
-        self.tokenizer.pad_token = self.tokenizer.unk_token  # Use unk token as pad
-        if self.tokenizer.pad_token is None:
-            # If no unk token, add a new pad token
-            self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-            self.model.resize_token_embeddings(len(self.tokenizer))
+        # Move model to the specified device
+        self.model = self.model.to(self.device)
+        self.model.eval()
 
     def set_seed(self, seed: int) -> None:
         """Set model-specific random seed."""
@@ -60,7 +56,7 @@ class GPT2Interface(ModelInterface):
             top_p: Nucleus sampling threshold (1.0 = no filtering)
 
         Returns:
-            List of generated token IDs
+            List of generated token IDs (without hidden states since they're not used)
         """
         config = get_config()
         stems = []
@@ -68,6 +64,8 @@ class GPT2Interface(ModelInterface):
 
         with torch.no_grad():
             for batch_start in range(0, num_stems, batch_size):
+                # Ensure we don't exceed num_stems
+                current_batch_size = min(batch_size, num_stems - batch_start)
 
                 # Convert input to tensor and create attention mask
                 input_tensor = torch.tensor([input_ids], dtype=torch.long, device=self.device)
@@ -79,7 +77,7 @@ class GPT2Interface(ModelInterface):
                     attention_mask=attention_mask,
                     max_new_tokens=stem_length,
                     min_new_tokens=stem_length,  # Force exact length
-                    num_return_sequences=batch_size,
+                    num_return_sequences=current_batch_size,  # Use actual batch size
                     temperature=temperature if temperature > 0 else 1e-7,
                     top_k=top_k if top_k > 0 else None,
                     top_p=top_p if top_p < 1.0 else None,
@@ -95,11 +93,11 @@ class GPT2Interface(ModelInterface):
                 generated_portions = outputs[:, input_length:]
 
                 # Convert to list and add to results
-                for i in range(batch_size):
+                for i in range(current_batch_size):
                     generated_tokens = generated_portions[i].tolist()
                     stems.append(generated_tokens)
 
-                # memory cleanup
+                # Memory cleanup
                 del outputs
                 del generated_portions
                 del input_tensor
