@@ -59,7 +59,7 @@ class DivergentGenerator:
             child = TreeNode(
                 token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
                 token_text=child_text, probability=probability,
-                depth=parent_node.depth + stem_length)
+                depth=parent_node.depth + len(rep_tokens))  # Use actual length after pruning
             parent_node.add_child(child)
 
             new_sequence = branch_sequence + rep_tokens
@@ -149,7 +149,7 @@ class DivergentGenerator:
         Generate stems iteratively until clusters are found or max limit reached.
 
         Returns:
-            tuple of (stem_tokens, stem_texts, total_stems_generated)
+            tuple of (stem_tokens, stem_texts, clustering_result, total_stems_generated)
         """
         all_stem_tokens = []
         all_stem_texts = []
@@ -158,17 +158,19 @@ class DivergentGenerator:
         total_generated = 0
 
         while total_generated < max_total_stems:
-            # Generate current batch
-            stems = self.model.generate_stems(branch_sequence, current_batch_size, stem_length,
-                                            temperature=temperature, top_k=top_k, top_p=top_p)
+            # Generate current batch with entropy data
+            stems, entropies = self.model.generate_stems(branch_sequence, current_batch_size, stem_length,
+                                                       temperature=temperature, top_k=top_k, top_p=top_p)
 
-            # Extract tokens, texts, and embeddings
+            # Prune stems based on entropy peaks
+            pruned_stems = self._prune_stems_by_entropy(stems, entropies, stem_length)
 
-            batch_texts = [self.model.decode(tokens) for tokens in stems]
+            # Extract texts and embeddings
+            batch_texts = [self.model.decode(tokens) for tokens in pruned_stems]
             batch_embeddings = self.embedding_provider.get_embeddings(batch_texts)
 
             # Add to accumulated results
-            all_stem_tokens.extend(stems)
+            all_stem_tokens.extend(pruned_stems)
             all_stem_texts.extend(batch_texts)
 
             if all_stem_embeddings is None:
@@ -194,6 +196,37 @@ class DivergentGenerator:
             print(f"No clusters found with {total_generated} stems, generating {current_batch_size} more...")
 
         return all_stem_tokens, all_stem_texts, clustering_result, total_generated
+
+    def _prune_stems_by_entropy(self, stems: List[List[int]], entropies: List[List[float]],
+                               original_stem_length: int) -> List[List[int]]:
+        """Prune stems at token entropy peaks."""
+        prune_range = self.config.getfloat("generation", "prune_range")
+
+        pruned_stems = []
+        search_range = max(1, int(prune_range * original_stem_length))
+        min_length = original_stem_length - search_range
+
+        for stem, entropy_sequence in zip(stems, entropies):
+
+            # Look for entropy peak in the final search_range tokens
+            search_start = min_length
+            search_entropies = entropy_sequence[search_start:]
+
+            if not search_entropies:
+                # No search range, keep full stem
+                pruned_stems.append(stem)
+                continue
+
+            # TODO test using a moving average of entropy to filter out noise
+            # Find the index of maximum entropy in the search range
+            peak_idx_in_range = np.argmax(search_entropies)
+            peak_idx = search_start + peak_idx_in_range
+
+            # Prune stem at the entropy peak (inclusive)
+            pruned_stem = stem[:peak_idx + 1]
+            pruned_stems.append(pruned_stem)
+
+        return pruned_stems
 
     def _print_stems(self, stem_texts: List[str], branch_node: TreeNode, original_prompt: str):
         """Print stems for inspection."""
