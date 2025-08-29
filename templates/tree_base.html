@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <style>
+        {styles}
+    </style>
+</head>
+<body>
+    <div id="tree-container">
+        <div class="controls">
+            <div class="control-group">
+                <label>Zoom:</label>
+                <input type="range" id="zoomSlider" min="0.1" max="3" step="0.1" value="1">
+                <span id="zoomValue">1.0</span>
+            </div>
+            <div class="control-group">
+                <label>Node Size:</label>
+                <input type="range" id="nodeSizeSlider" min="0.5" max="2" step="0.1" value="1">
+                <span id="nodeSizeValue">1.0</span>
+            </div>
+            <div class="control-group">
+                <label>Layout:</label>
+                <select id="layoutSelect">
+                    <option value="radial">Radial</option>
+                    <option value="tree">Tree</option>
+                </select>
+            </div>
+            <button id="resetView">Reset View</button>
+        </div>
+
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="cluster-panel">
+        <div id="no-selection">
+            <h3>Cluster Visualization</h3>
+            <p>Click on a node to see its semantic clusters</p>
+        </div>
+
+        <div id="cluster-content" class="hidden">
+            <h3 id="selected-node-text">Selected Node</h3>
+            <canvas id="cluster-viewer"></canvas>
+            <div id="cluster-stats"></div>
+            <div id="cluster-samples"></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        {script}
+    </script>
+</body>
+</html>

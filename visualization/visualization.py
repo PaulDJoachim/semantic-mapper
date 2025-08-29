@@ -9,9 +9,26 @@ class TreeVisualizer:
     """Interactive HTML visualization for analysis reports."""
 
     def __init__(self):
-        self.template_path = Path("./templates/tree_template.html")
-        if not self.template_path.exists():
-            raise FileNotFoundError(f"Template not found: {self.template_path}")
+        self.templates_dir = Path("./templates")
+        self.required_files = {
+            'base': 'tree_base.html',
+            'styles': 'tree_styles.css',
+            'script': 'tree_script.js'
+        }
+
+        # Verify all template files exist
+        for name, filename in self.required_files.items():
+            file_path = self.templates_dir / filename
+            if not file_path.exists():
+                raise FileNotFoundError(f"Template file not found: {file_path}")
+
+    def _load_template_parts(self):
+        """Load all template components."""
+        parts = {}
+        for name, filename in self.required_files.items():
+            file_path = self.templates_dir / filename
+            parts[name] = file_path.read_text(encoding='utf-8')
+        return parts
 
     def export(self, report: AnalysisReport, output_dir: str) -> str:
         """Export report to HTML and return the output path."""
@@ -26,11 +43,19 @@ class TreeVisualizer:
         filename = f"tree_{timestamp}_{safe_prompt}.html"
         output_path = output_dir / filename
 
-        # Read template and substitute variables
-        template_content = self.template_path.read_text(encoding='utf-8')
-        html_content = template_content.format(
-            title=f"Tree: {report.prompt[:50]}...",
+        # Load template parts
+        parts = self._load_template_parts()
+
+        # Substitute tree data in the script first
+        processed_script = parts['script'].format(
             tree_data=TreeOperations.to_json(report.root)
+        )
+
+        # Assemble final HTML
+        html_content = parts['base'].format(
+            title=f"Tree: {report.prompt[:50]}...",
+            styles=parts['styles'],
+            script=processed_script
         )
 
         output_path.write_text(html_content, encoding='utf-8')
