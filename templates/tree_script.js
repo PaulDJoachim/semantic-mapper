@@ -32,7 +32,6 @@ class ClusterVisualizer {{
         const rect = this.canvas.getBoundingClientRect();
         this.camera = new THREE.PerspectiveCamera(75, rect.width / rect.height, 0.1, 1000);
 
-        // Start with a better initial camera position
         this.resetCamera();
 
         this.renderer = new THREE.WebGLRenderer({{ canvas: this.canvas, antialias: true }});
@@ -63,8 +62,7 @@ class ClusterVisualizer {{
     }}
 
     resetCamera() {{
-        // Position camera to look at origin from a good angle
-        this.camera.position.set(1.5, 1.0, 1.5);
+        this.camera.position.set(1.2, 1.0, 1.2);
         this.camera.lookAt(0, 0, 0);
     }}
 
@@ -87,14 +85,12 @@ class ClusterVisualizer {{
                     y: e.offsetY - previousMouse.y
                 }};
 
-                // Orbit around the origin
                 const spherical = new THREE.Spherical();
                 spherical.setFromVector3(this.camera.position);
 
                 spherical.theta -= deltaMove.x * 0.01;
                 spherical.phi += deltaMove.y * 0.01;
 
-                // Clamp phi to avoid flipping
                 spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
 
                 this.camera.position.setFromSpherical(spherical);
@@ -106,7 +102,7 @@ class ClusterVisualizer {{
         this.canvas.addEventListener('wheel', (e) => {{
             e.preventDefault();
             const distance = this.camera.position.length();
-            const newDistance = Math.max(0.5, Math.min(5, distance + e.deltaY * 0.01));
+            const newDistance = Math.max(0.5, Math.min(5, distance + e.deltaY * 0.002));
             this.camera.position.normalize().multiplyScalar(newDistance);
         }});
     }}
@@ -141,7 +137,6 @@ class ClusterVisualizer {{
             this.sphereGroup.add(sphere);
         }});
 
-        // Reset camera to center the new clusters
         this.resetCamera();
     }}
 
@@ -182,8 +177,12 @@ class TreeVisualizer {{
 
         this.nodes = [];
         this.edges = [];
-        this.expandedNodes = new Set(); // Track expanded nodes
+        this.expandedNodes = new Set();
         this.nodeDimensionsCache = new Map();
+
+        // Path highlighting state
+        this.highlightedNodes = new Set();
+        this.highlightedEdges = new Set();
 
         this.setupCanvas();
         this.setupEventListeners();
@@ -200,12 +199,11 @@ class TreeVisualizer {{
         const container = document.getElementById('tree-container');
         const controls = document.querySelector('.controls');
         const availableWidth = container.clientWidth;
-        const availableHeight = container.clientHeight - controls.offsetHeight - 40; // padding
+        const availableHeight = container.clientHeight - controls.offsetHeight - 40;
 
         this.canvas.width = availableWidth;
         this.canvas.height = availableHeight;
 
-        // Center the view on resize
         this.viewState.offsetX = availableWidth / 2;
         this.viewState.offsetY = availableHeight / 2;
 
@@ -261,11 +259,10 @@ class TreeVisualizer {{
             dragStarted = false;
         }});
 
-        // Mouse wheel zoom
         this.canvas.addEventListener('wheel', (e) => {{
             e.preventDefault();
             const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-            const newZoom = Math.max(0.1, Math.min(3, this.viewState.zoom * zoomFactor));
+            const newZoom = Math.max(0.1, Math.min(8, this.viewState.zoom * zoomFactor));
 
             if (newZoom !== this.viewState.zoom) {{
                 this.viewState.zoom = newZoom;
@@ -313,6 +310,8 @@ class TreeVisualizer {{
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
+        let nodeClicked = false;
+
         for (const node of this.nodes) {{
             const screen = this.worldToScreen(node.x, node.y);
             const dimensions = this.getNodeDimensions(node);
@@ -323,8 +322,9 @@ class TreeVisualizer {{
             const bottom = screen.y + dimensions.height / 2;
 
             if (clickX >= left && clickX <= right && clickY >= top && clickY <= bottom) {{
-                // Toggle expansion for long text
-                if (node.text.length > 25) {{
+                nodeClicked = true;
+
+                if (dimensions.canExpand) {{
                     if (this.expandedNodes.has(node.id)) {{
                         this.expandedNodes.delete(node.id);
                     }} else {{
@@ -338,75 +338,182 @@ class TreeVisualizer {{
                 break;
             }}
         }}
+
+        // If no node was clicked, clear selection
+        if (!nodeClicked) {{
+            this.clearSelection();
+        }}
+    }}
+
+    clearSelection() {{
+        this.selectedNode = null;
+        this.highlightedNodes.clear();
+        this.highlightedEdges.clear();
+        this.hideClusterData();
+        this.render();
     }}
 
     selectNode(node) {{
         this.selectedNode = node;
+        this.updateHighlightedPaths(node);
         this.render();
 
-        if (node.cluster_data && node.cluster_data.samples && node.cluster_data.samples.length > 0) {{
-            this.showClusterData(node);
-        }} else {{
-            this.hideClusterData();
+        // Always show the selection data (path info), regardless of cluster data
+        this.showSelectionData(node);
+    }}
+
+    // get the complete path from root to a given node
+    getPathToNode(nodeId) {{
+        const path = [];
+        let currentNode = this.nodes[nodeId];
+        
+        // Traverse up the tree to collect all tokens
+        while (currentNode) {{
+            path.unshift(currentNode.text); // Add to beginning of array
+            
+            if (currentNode.parentId !== null) {{
+                currentNode = this.nodes[currentNode.parentId];
+            }} else {{
+                break;
+            }}
+        }}
+        
+        return path;
+    }}
+
+    // get path with selected node info
+    getPathWithSelection(nodeId) {{
+        const pathTokens = this.getPathToNode(nodeId);
+        const selectedToken = this.nodes[nodeId].text;
+        
+        return {{
+            fullPath: pathTokens.join(''),
+            selectedToken: selectedToken,
+            pathBeforeSelected: pathTokens.slice(0, -1).join('')
+        }};
+    }}
+
+    // Path highlighting methods
+    updateHighlightedPaths(node) {{
+        this.highlightedNodes.clear();
+        this.highlightedEdges.clear();
+
+        if (!node) return;
+
+        // Get all connected nodes (ancestors + descendants)
+        const connectedNodes = new Set();
+
+        // Add ancestors (path to root)
+        this.getPathToRoot(node.id, connectedNodes);
+
+        // Add descendants (all children)
+        this.getAllDescendants(node.id, connectedNodes);
+
+        this.highlightedNodes = connectedNodes;
+
+        // Find edges connecting highlighted nodes
+        this.edges.forEach((edge, index) => {{
+            if (this.highlightedNodes.has(edge.from) && this.highlightedNodes.has(edge.to)) {{
+                this.highlightedEdges.add(index);
+            }}
+        }});
+    }}
+
+    getPathToRoot(nodeId, connectedNodes) {{
+        connectedNodes.add(nodeId);
+        const node = this.nodes[nodeId];
+        if (node && node.parentId !== null) {{
+            this.getPathToRoot(node.parentId, connectedNodes);
         }}
     }}
 
-    showClusterData(node) {{
+    getAllDescendants(nodeId, connectedNodes) {{
+        connectedNodes.add(nodeId);
+
+        // Find all edges where this node is the parent
+        this.edges.forEach(edge => {{
+            if (edge.from === nodeId && !connectedNodes.has(edge.to)) {{
+                this.getAllDescendants(edge.to, connectedNodes);
+            }}
+        }});
+    }}
+
+    showSelectionData(node) {{
         document.getElementById('no-selection').classList.add('hidden');
         document.getElementById('cluster-content').classList.remove('hidden');
-        document.getElementById('selected-node-text').textContent = `"${{node.text.substring(0, 50)}}..."`;
+        
+        // Get path information with selection details
+        const pathInfo = this.getPathWithSelection(node.id);
+        
+        // Create HTML with bold selected token
+        const selectedNodeElement = document.getElementById('selected-node-text');
+        selectedNodeElement.innerHTML = `"${{pathInfo.pathBeforeSelected}}<strong>${{pathInfo.selectedToken}}</strong>"`;
 
-        const stats = node.cluster_data.stats || {{}};
-        const statsHtml = Object.entries(stats)
-            .map(([cluster, count]) => `<div>${{cluster}}: ${{count}} samples</div>`)
-            .join('');
-        document.getElementById('cluster-stats').innerHTML = `<div class="cluster-info">${{statsHtml}}</div>`;
+        // Check if node has cluster data
+        const hasClusterData = node.cluster_data && node.cluster_data.samples && node.cluster_data.samples.length > 0;
 
-        // Group samples by cluster
-        const clusterGroups = {{}};
-        node.cluster_data.samples.forEach(sample => {{
-            const clusterId = sample.cluster;
-            const clusterKey = clusterId === -1 ? 'noise' : `cluster_${{clusterId}}`;
-            if (!clusterGroups[clusterKey]) {{
-                clusterGroups[clusterKey] = [];
+        if (hasClusterData) {{
+            // Show cluster statistics
+            const stats = node.cluster_data.stats || {{}};
+            const statsHtml = Object.entries(stats)
+                .map(([cluster, count]) => `<div>${{cluster}}: ${{count}} samples</div>`)
+                .join('');
+            document.getElementById('cluster-stats').innerHTML = `<div class="cluster-info">${{statsHtml}}</div>`;
+
+            // Show cluster samples
+            const clusterGroups = {{}};
+            node.cluster_data.samples.forEach(sample => {{
+                const clusterId = sample.cluster;
+                const clusterKey = clusterId === -1 ? 'noise' : `cluster_${{clusterId}}`;
+                if (!clusterGroups[clusterKey]) {{
+                    clusterGroups[clusterKey] = [];
+                }}
+                clusterGroups[clusterKey].push(sample);
+            }});
+
+            const clustersHtml = Object.entries(clusterGroups)
+                .sort(([a], [b]) => {{
+                    if (a === 'noise') return 1;
+                    if (b === 'noise') return -1;
+                    return a.localeCompare(b);
+                }})
+                .map(([clusterKey, samples]) => {{
+                    const displayName = clusterKey === 'noise' ? 'Noise' : clusterKey.replace('_', ' ');
+                    const sampleCount = samples.length;
+
+                    const samplesHtml = samples
+                        .map(sample => `<div class="sample-text" style="border-left-color: ${{sample.color}}">${{sample.text}}</div>`)
+                        .join('');
+
+                    return `
+                        <div class="cluster-group">
+                            <div class="cluster-header" onclick="toggleCluster('${{clusterKey}}')">
+                                <span>${{displayName}} (${{sampleCount}} samples)</span>
+                                <span class="expand-icon" id="icon-${{clusterKey}}">▼</span>
+                            </div>
+                            <div class="cluster-content" id="content-${{clusterKey}}">
+                                ${{samplesHtml}}
+                            </div>
+                        </div>
+                    `;
+                }})
+                .join('');
+
+            document.getElementById('cluster-samples').innerHTML = clustersHtml;
+
+            // Show 3D cluster visualization
+            const viewer = this.initClusterViewer();
+            viewer.showClusters(node.cluster_data);
+        }} else {{
+            // Node has no cluster data - show basic info
+            document.getElementById('cluster-stats').innerHTML = '<div class="cluster-info">No cluster data available for this node.</div>';
+            document.getElementById('cluster-samples').innerHTML = '';
+            
+            // Clear the 3D viewer
+            if (this.clusterViewer) {{
+                this.clusterViewer.clear();
             }}
-            clusterGroups[clusterKey].push(sample);
-        }});
-
-        // Generate collapsible HTML
-        const clustersHtml = Object.entries(clusterGroups)
-            .sort(([a], [b]) => {{
-                // Sort: numbered clusters first, then noise
-                if (a === 'noise') return 1;
-                if (b === 'noise') return -1;
-                return a.localeCompare(b);
-            }})
-            .map(([clusterKey, samples]) => {{
-                const displayName = clusterKey === 'noise' ? 'Noise' : clusterKey.replace('_', ' ');
-                const sampleCount = samples.length;
-
-                const samplesHtml = samples
-                    .map(sample => `<div class="sample-text" style="border-left-color: ${{sample.color}}">${{sample.text}}</div>`)
-                    .join('');
-
-                return `
-                    <div class="cluster-group">
-                        <div class="cluster-header" onclick="toggleCluster('${{clusterKey}}')">
-                            <span>${{displayName}} (${{sampleCount}} samples)</span>
-                            <span class="expand-icon" id="icon-${{clusterKey}}">▼</span>
-                        </div>
-                        <div class="cluster-content" id="content-${{clusterKey}}">
-                            ${{samplesHtml}}
-                        </div>
-                    </div>
-                `;
-            }})
-            .join('');
-
-        document.getElementById('cluster-samples').innerHTML = clustersHtml;
-
-        const viewer = this.initClusterViewer();
-        viewer.showClusters(node.cluster_data);
+        }}
     }}
 
     hideClusterData() {{
@@ -440,6 +547,11 @@ class TreeVisualizer {{
         }} else {{
             this.layoutTree();
         }}
+
+        // Update highlighting for current selection
+        if (this.selectedNode) {{
+            this.updateHighlightedPaths(this.selectedNode);
+        }}
     }}
 
     layoutRadial() {{
@@ -471,9 +583,12 @@ class TreeVisualizer {{
 
         if (node.children && node.children.length > 0) {{
             const childCount = node.children.length;
-            const baseRadius = 120 + (level * 60);
+            const baseRadius = 80 + (level * level * 10); // Quadratic growth
             const effectiveRadius = baseRadius * this.viewState.nodeScale;
-            const angleSpread = Math.min(Math.PI * 1.6, Math.max(0.6, childCount * 0.4));
+            const levelFactor = Math.pow(0.6, level-1); // Tighter at deeper levels
+            const maxAngleSpread = level === 0 ? Math.PI * 1.5 : Math.PI * 0.9;
+            const minAngleSpread = 0.4;
+            const angleSpread = Math.min(maxAngleSpread, Math.max(minAngleSpread, childCount * 0.2 * levelFactor));
             const startAngle = parentAngle - angleSpread / 2;
 
             node.children.forEach((child, index) => {{
@@ -521,6 +636,32 @@ class TreeVisualizer {{
         }}
     }}
 
+    wrapText(text, maxWidth, fontSize) {{
+        this.ctx.font = `${{fontSize}}px Arial`;
+
+        const words = text.trim().split(/\s+/);
+        const lines = [];
+        let currentLine = '';
+
+        for (const word of words) {{
+            const testLine = currentLine + (currentLine ? ' ' : '') + word;
+            const testWidth = this.ctx.measureText(testLine).width;
+
+            if (testWidth <= maxWidth || !currentLine) {{
+                currentLine = testLine;
+            }} else {{
+                lines.push(currentLine);
+                currentLine = word;
+            }}
+        }}
+
+        if (currentLine) {{
+            lines.push(currentLine);
+        }}
+
+        return lines;
+    }}
+
     getNodeDimensions(node) {{
         const isExpanded = this.expandedNodes.has(node.id);
         const cacheKey = `${{node.id}}-${{this.viewState.zoom}}-${{this.viewState.nodeScale}}-${{isExpanded}}`;
@@ -531,55 +672,90 @@ class TreeVisualizer {{
 
         const baseScale = this.viewState.nodeScale;
         const zoomScale = Math.max(0.3, Math.min(1.2, this.viewState.zoom));
-        const fontSize = Math.max(10, 14 * baseScale * zoomScale);
+        const fontSize = Math.max(8, 10 * baseScale * zoomScale * this.viewState.nodeScale);
+        const padding = Math.max(8, 12 * baseScale);
 
         this.ctx.font = `${{fontSize}}px Arial`;
 
-        let displayText = node.text.trim();
-        const hasLongText = displayText.length > 25;
+        const displayText = node.text.trim();
+        const baseWidth = Math.max(120, 140 * baseScale);
+        const maxTextWidth = baseWidth - (padding * 2);
 
-        if (!isExpanded && hasLongText) {{
-            const charLimit = Math.floor(15 + (zoomScale * 10));
-            displayText = displayText.substring(0, charLimit) + '...';
+        const allLines = this.wrapText(displayText, maxTextWidth, fontSize);
+
+        let lines, canExpand;
+        const maxCollapsedLines = 3;
+
+        if (!isExpanded && allLines.length > maxCollapsedLines) {{
+            lines = allLines.slice(0, maxCollapsedLines);
+            lines[maxCollapsedLines - 1] += '...';
+            canExpand = true;
+        }} else {{
+            lines = allLines;
+            canExpand = allLines.length > maxCollapsedLines;
         }}
 
-        const textWidth = this.ctx.measureText(displayText).width;
-        const padding = Math.max(12, 16 * baseScale);
-        const width = Math.max(textWidth + padding * 2, 60 * baseScale);
-        const height = Math.max(fontSize + padding * 2, 40 * baseScale);
+        const width = baseWidth;
+        const lineHeight = fontSize + (fontSize * 0.2);
+        const height = Math.max(
+            (lines.length * lineHeight) + padding * 2,
+            40 * baseScale
+        );
 
         const dimensions = {{
             width,
             height,
             padding,
             fontSize,
-            displayText,
+            lines,
             isExpanded,
-            hasLongText
+            canExpand,
+            lineHeight
         }};
 
         this.nodeDimensionsCache.set(cacheKey, dimensions);
         return dimensions;
     }}
 
+    // Enhanced render method with layered drawing
     render() {{
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.drawEdges();
-        this.drawNodes();
+
+        // Draw in layers: dimmed elements first, then highlighted on top
+        this.drawEdges(false); // Draw non-highlighted edges
+        this.drawNodes(false); // Draw non-highlighted nodes
+        this.drawEdges(true);  // Draw highlighted edges
+        this.drawNodes(true);  // Draw highlighted nodes
     }}
 
-    drawEdges() {{
+    drawEdges(highlightedOnly = false) {{
         this.ctx.lineWidth = Math.max(1, 2 * this.viewState.zoom);
 
-        this.edges.forEach(edge => {{
+        this.edges.forEach((edge, index) => {{
+            const isHighlighted = this.highlightedEdges.has(index);
+
+            // Skip based on what we're drawing in this pass
+            if (highlightedOnly && !isHighlighted) return;
+            if (!highlightedOnly && isHighlighted) return;
+
             const fromNode = this.nodes[edge.from];
             const toNode = this.nodes[edge.to];
 
             const fromScreen = this.worldToScreen(fromNode.x, fromNode.y);
             const toScreen = this.worldToScreen(toNode.x, toNode.y);
 
-            const alpha = Math.max(0.3, toNode.probability);
+            let alpha = Math.max(0.3, toNode.probability);
+            let lineWidth = Math.max(1, 2 * this.viewState.zoom);
+
+            if (isHighlighted) {{
+                alpha = Math.min(1, alpha + 0.2); // Brighter
+                lineWidth *= 1.5; // Thicker
+            }} else if (this.highlightedNodes.size > 0) {{
+                alpha *= 0.3; // Dimmed when something else is highlighted
+            }}
+
             this.ctx.strokeStyle = `rgba(100, 100, 100, ${{alpha}})`;
+            this.ctx.lineWidth = lineWidth;
 
             this.ctx.beginPath();
             if (this.viewState.layout === 'tree') {{
@@ -594,16 +770,22 @@ class TreeVisualizer {{
         }});
     }}
 
-    drawNodes() {{
+    drawNodes(highlightedOnly = false) {{
         this.nodes.forEach(node => {{
+            const isHighlighted = this.highlightedNodes.has(node.id);
+
+            // Skip based on what we're drawing in this pass
+            if (highlightedOnly && !isHighlighted) return;
+            if (!highlightedOnly && isHighlighted) return;
+
             const screen = this.worldToScreen(node.x, node.y);
-            this.drawNode(screen.x, screen.y, node);
+            this.drawNode(screen.x, screen.y, node, isHighlighted);
         }});
     }}
 
-    drawNode(x, y, node) {{
+    drawNode(x, y, node, isHighlighted = false) {{
         const dimensions = this.getNodeDimensions(node);
-        const {{ width, height, padding, fontSize, displayText, isExpanded, hasLongText }} = dimensions;
+        const {{ width, height, padding, fontSize, lines, isExpanded, canExpand, lineHeight }} = dimensions;
 
         const rectX = x - width / 2;
         const rectY = y - height / 2;
@@ -611,14 +793,22 @@ class TreeVisualizer {{
 
         const hue = (node.level * 45) % 360;
         const saturation = Math.max(40, 70 - node.level * 5);
-        const lightness = Math.max(35, 55 - node.level * 3);
-        const color = `hsl(${{hue}}, ${{saturation}}%, ${{lightness}}%)`;
+        let lightness = Math.max(35, 55 - node.level * 3);
 
         const isSelected = this.selectedNode && this.selectedNode.id === node.id;
         const hasClusterData = node.cluster_data && node.cluster_data.samples && node.cluster_data.samples.length > 0;
 
+        // Adjust appearance based on highlight state
+        if (isHighlighted) {{
+            lightness = Math.min(75, lightness + 5); // Brighter
+        }} else if (this.highlightedNodes.size > 0) {{
+            lightness = Math.max(10, lightness - 50); // Dimmer
+        }}
+
+        const color = `hsl(${{hue}}, ${{saturation}}%, ${{lightness}}%)`;
+
         let borderColor = '#cccccc';
-        let borderWidth = Math.max(1, 2 * this.viewState.zoom);
+        let borderWidth = 1;
 
         if (isSelected) {{
             borderColor = '#ffffff';
@@ -628,6 +818,11 @@ class TreeVisualizer {{
             borderWidth = 2;
         }}
 
+        if (isHighlighted) {{
+            borderWidth *= 1.5; // Thicker border for highlighted nodes
+        }}
+
+        // Draw rounded rectangle background
         this.drawRoundedRect(rectX, rectY, width, height, cornerRadius);
         this.ctx.fillStyle = color;
         this.ctx.fill();
@@ -637,17 +832,29 @@ class TreeVisualizer {{
         this.ctx.stroke();
 
         if (this.viewState.zoom > 0.2) {{
-            this.ctx.fillStyle = '#ffffff';
+            // Adjust text opacity based on highlight state
+            let textAlpha = 1;
+            if (!isHighlighted && this.highlightedNodes.size > 0) {{
+                textAlpha = 0.5;
+            }}
+
+            this.ctx.fillStyle = `rgba(255, 255, 255, ${{textAlpha}})`;
             this.ctx.font = `${{fontSize}}px Arial`;
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
-            this.ctx.fillText(displayText, x, y);
 
-            // Show expand indicator for long text
-            if (hasLongText && !isExpanded && this.viewState.zoom > 0.5) {{
-                this.ctx.fillStyle = '#aaaaaa';
+            const totalTextHeight = (lines.length - 1) * lineHeight;
+            const startY = y - (totalTextHeight / 2);
+
+            lines.forEach((line, index) => {{
+                const lineY = startY + (index * lineHeight);
+                this.ctx.fillText(line, x, lineY);
+            }});
+
+            if (canExpand && !isExpanded && this.viewState.zoom > 0.5) {{
+                this.ctx.fillStyle = `rgba(170, 170, 170, ${{textAlpha}})`;
                 this.ctx.font = `${{Math.max(8, fontSize * 0.7)}}px Arial`;
-                this.ctx.fillText('⋯', x + width/2 - 15, y - height/2 + 12);
+                this.ctx.fillText('â‹¯', x + width/2 - 15, y - height/2 + 12);
             }}
         }}
     }}

@@ -8,8 +8,8 @@ class EmbeddingTo3D:
     """Convert high-dimensional embeddings to 3D positions for visualization."""
 
     CLUSTER_COLORS = [
-        '#ff6b6b', '#96e338', '#45b7d1', '#96ceb4',
-        '#fd79a8', '#fdcb6e', '#e17055', '#74b9ff',
+        '#ff6b6b', '#96e338', '#45b7d1', '#ffc619',
+        '#9c46ec', '#ce7e00', '#2c81db', '#74b9ff',
         '#a29bfe', '#6c5ce7'
     ]
     NOISE_COLOR = '#c1bbb9'

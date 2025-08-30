@@ -42,6 +42,11 @@ body {
     color: #fff;
 }
 
+#cluster-panel h4 {
+    margin-top: 0;
+    color: #fff;
+}
+
 #cluster-viewer {
     width: 100%;
     height: 300px;
