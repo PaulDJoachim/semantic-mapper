@@ -116,8 +116,8 @@ class HierarchicalAnalyzer(ClusterAnalyzer):
 
             # Find item closest to cluster centroid
             centroid = np.mean(cluster_embeddings, axis=0)
-            distances = cosine_distances([centroid], cluster_embeddings)[0]
-            closest_idx = cluster_indices[np.argmin(distances)]
+            similarities = np.dot(cluster_embeddings, centroid)
+            closest_idx = cluster_indices[np.argmax(similarities)]
             representatives.append(items[closest_idx])
 
         return representatives

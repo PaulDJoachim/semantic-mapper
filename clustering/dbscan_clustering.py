@@ -39,24 +39,23 @@ class DBSCANClusterAnalyzer(ClusterAnalyzer):
                                     clustering_result: ClusteringResult) -> List[Any]:
         """Get representative items using embedding distances."""
         embeddings = clustering_result.embeddings
-        if embeddings is None:
-            raise ValueError("embeddings required for representative selection")
-
         labels = clustering_result.labels
-        unique_labels = [label for label in set(labels) if label != -1]
 
-        if not unique_labels:
-            return [items[0]] if items else []
+        if not items or embeddings is None:
+            return []
 
+        # Only get representatives for valid clusters (not noise points)
+        valid_labels = [label for label in set(labels) if label >= 0]
         representatives = []
 
-        for cluster_id in unique_labels:
-            cluster_indices = [i for i, label in enumerate(labels) if label == cluster_id]
+        for label in sorted(valid_labels):
+            cluster_indices = [i for i, l in enumerate(labels) if l == label]
             cluster_embeddings = embeddings[cluster_indices]
 
+            # Find item closest to cluster centroid
             centroid = np.mean(cluster_embeddings, axis=0)
-            distances = cosine_distances([centroid], cluster_embeddings)[0]
-            closest_idx = cluster_indices[np.argmin(distances)]
+            similarities = np.dot(cluster_embeddings, centroid)
+            closest_idx = cluster_indices[np.argmax(similarities)]
             representatives.append(items[closest_idx])
 
         return representatives
