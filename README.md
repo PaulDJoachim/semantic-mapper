@@ -4,9 +4,11 @@ A work-in-progress tool for exploring the semantic branching behavior of languag
 
 ## What This Does
 
-Language model interfaces are typically optimized to produce a single "best" continuation from any given prompt. DIA attempts to identify conditions under which this optimzation fails: it generates many possible continuations, clusters them semantically, and builds a tree structure that reveals where the model's reasoning genuinely diverges toward multiple strong attractors.
+Language models trained on diverse text learn to represent multiple conflicting reasoning paths, but standard inference only surfaces one. This tool attempts to uncover latent structures in a model's internal landscape by giving it the same prompt multiple times and iteratively clustering the results into a graph of semantic nodes.
 
-This is based on the hypothesis that consumer-tuned models may still contain latent capabilities for statistically significant yet semantically conflicting inference chains - even if those chains are buried under safety training or preference optimization. By sampling broadly and clustering semantically similar continuations, we can potentially surface these alternative reasoning paths.
+The goal is to reveal the primary ways in which a model might respond to a given prompt by filtering both trivial variations in phrasing, and low-probability noise. Ideally, this technique creates a set of responses that are meaningfully different from each other, while remaining statistically significant.
+
+This project was created as a way to learn more about the inner workings of language models. I'm not sure if it has any practical applications, but it's a fun way to explore and compare their behaviors.
 
 ![Example Image](./images/example_img.png)
 
@@ -19,33 +21,29 @@ This is very much a work in progress. The basic pipeline functions and will:
 - Recursively generate multiple continuation "stems" and nodes from an initial prompt
 - Prune stems based on abrupt jumps in token entropy
 - Create semantic embeddings of stems using a sentence transformer model
-- Group stem embeddings using a clustering algorhythm (DBSCAN or Heirarchical currently)
-- Select cluster representitives for continuation or branching
+- Group stem embeddings using a clustering algorithm (DBSCAN or Hierarchical currently)
+- Select cluster representatives for continuation or branching
 - Build an interactive html visualization showing where semantic divergence is detected
-- Display the stem clustering of each node as a 3D PCA projection, along with the text of all stems in each cluster
-
-## Limitations and TODOs
-
-- Only tested on GPT-2 models, which aren't really intelligent enough to function as an actual proof of concept. (larger models will need better memory management)
-- Inference, embedding, and clustering parameters need tuning for usable results in different prompts/domains
-- Currently no quantitative metrics for "semantic divergence". Debatable as to whether or not sentence embeddings constitute a valid evaluation of meaning
-- Depth-triggered branch clustering should be tested to validate semantic divergence is non-trival (and to reduce redundundant branching)
-- Visualization is rudimentary and could use more QoL features/polish
-- Data output is sparse at the moment. Could use more comprehensive stats
-- Limited testing on different model types and prompt categories
-- There are many places that could benefit from optimization and refactoring
+- Display the stem clustering of each node as a 3D PCA projection, along with the text of
+  all stems in each cluster
 
 ## Possible Use Cases
 
-- **Security research**: Identifying potential jailbreak vectors or unintended model behaviors
-- **Model evaluation**: Understanding how alignment training affects latent model capabilities
+- **Security Research**: Identifying potential jailbreak vectors or unintended model
+  behaviors
+- **Model Evaluation**: Understanding how alignment training affects latent model
+  capabilities
+- **Inference Prediction**: Identifying major semantic attractors in a prompt space
 - **Curiosity**: Exploring the "what if" space around contentious or ambiguous prompts
+- **Procedural Content Generation**: Dialog trees, story branching, etc.
 
 ## Quick Start
 
 TODO - add requirements.txt and quick start instructions
 
-## Configuration
+## How to Use This
+
+Configuration
 
 Edit `config.ini` to adjust:
 
@@ -54,7 +52,37 @@ Edit `config.ini` to adjust:
 - Clustering sensitivity (eps, minimum cluster size)
 - Visualization options
 
-TODO - more detail about config settings
+TODO - more detail about config settings and general usage
+
+## Limitations and TODOs
+
+- Only tested on smaller models (<4B parameters), which may lack sufficient semantic comprehension to prove the concept. Improve memory management to make larger models more viable
+- Inference, embedding, and clustering parameters need tuning for usable results in different prompts/domains
+- Test performance of embeddings created with the cumulative chain of inference, rather than just individual stems
+  - pooled with weighted mean favoring most recent stem?
+- Currently, no quantitative measure of success: some standard or scoring metric should be established to distinguish a "good" evaluation of semantic divergence from a "poor" one
+  - Distribution curve of samples among clusters?
+  - Signal (clustered) to noise (unclustered) ratio?
+  - Silhouette scoring?
+- This tool can create the appearance of structures within sample data that do not meaningfully exist; aforementioned scoring should reflect confidence in an obvious and easy-to-read way to avoid misleading users.
+- Metrics for detecting bad configurations and automated suggestions for improving them (monolithic clustering, samples too diverse for size of dataset, etc.)
+- Depth-triggered branch clustering should be tested to validate semantic divergence is non-trivial at scales larger than stems (and to reduce redundant branching)
+- Should use a log instead of just print statements
+- Needs system prompts!
+- Needs authentication/credential handling for gated models
+- Needs config options for pooled embeddings (max, mean, etc.)
+- Visualization is rudimentary and could use more QoL features/polish
+- Data output is sparse at the moment. Could use more comprehensive stats
+- Limited testing on different model types and prompt categories
+- There are many places that could benefit from optimization and refactoring
+
+
+## Feature Ideas
+- **Search Function**: Allow text searching for specific phrases across a tree
+- **Inter-prompt Comparison**: View differences between multiple variants of a prompt to identify subtle causes of semantic divergence
+- **Live Visualization**: Allow live updating of the tree as the model generates new stems and create UI for directing where stems are generated and how they are clustered
+- **Conversation/Instruct Mode**: Allow the user to input a prompt via UI. After tree is generated, allow the user to choose which leaf to respond at and continue generation from that point
+- **Gradient Analysis**: Generate the dendrogram with a high degree of granularity and allow users to dynamically change clustering "cut depth" to view different degrees of divergence
 
 ## Architecture
 
