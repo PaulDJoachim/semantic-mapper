@@ -22,6 +22,7 @@ class ModelInterface(ABC):
         """Return stems as lists of token IDs"""
         pass
 
+
 def get_model(model_name: str = None, **kwargs) -> ModelInterface:
     """Create model instance of specified type."""
     model_name = model_name
@@ -34,12 +35,13 @@ def get_model(model_name: str = None, **kwargs) -> ModelInterface:
         from models.gpt_two import GPT2Interface
         return GPT2Interface(model_name, **kwargs)
 
-    elif model_name == "microsoft/Phi-3.5-mini-instruct":
-        from models.phi_instruct import PhiInterface
-        return PhiInterface(model_name, **kwargs)
-
     else:
-        raise ValueError(f"Unknown model: {model_name}")
+        try:
+            from models.generic_transformer import GenericTransformer
+            return GenericTransformer(model_name, **kwargs)
+
+        except ValueError:
+            raise ValueError(f"Unknown model: {model_name}")
 
 
 def get_embedder(embedding_model: str = None, **kwargs):
@@ -48,11 +50,12 @@ def get_embedder(embedding_model: str = None, **kwargs):
     if embedding_model == "mock":
         from semantic_embedding.mock_embedding import MockEmbeddingProvider
         embedding_provider = MockEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
-    elif embedding_model == "all-MiniLM-L6-v2":
-        from semantic_embedding.sentence_embedding import SentenceEmbeddingProvider
-        embedding_provider = SentenceEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
     else:
-        raise ValueError(f"Unknown embedding model: {embedding_model}")
+        try:
+            from semantic_embedding.sentence_embedding import SentenceEmbeddingProvider
+            embedding_provider = SentenceEmbeddingProvider(model_name=embedding_model, **kwargs.get('embedding_kwargs', {}))
+        except ValueError:
+            raise ValueError(f"Unknown embedding model: {embedding_model}")
 
     return embedding_provider
 
