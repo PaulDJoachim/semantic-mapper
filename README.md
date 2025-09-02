@@ -1,4 +1,4 @@
-# Divergent Inference Architecture (DIA)
+# Divergent Inference Analysis
 
 A work-in-progress tool for exploring the semantic branching behavior of language models, particularly when they encounter prompts that might lead to conflicting lines of reasoning.
 
@@ -10,10 +10,8 @@ The goal is to reveal the primary ways in which a model might respond to a given
 
 This project was created as a way to learn more about the inner workings of language models. I'm not sure if it has any practical applications, but it's a fun way to explore and compare their behaviors.
 
-![Example Image](./images/example_img.png)
-
+![Example Gif](./images/example_gif_01.gif)
 ![Example Image](./images/example_img_02.png)
-
 ## Current State
 
 This is very much a work in progress. The basic pipeline functions and will:
@@ -71,6 +69,7 @@ TODO - more detail about config settings and general usage
 - Needs system prompts!
 - Needs authentication/credential handling for gated models
 - Needs config options for pooled embeddings (max, mean, etc.)
+- Test linking stem entropy to clustering sensitivity
 - Visualization is rudimentary and could use more QoL features/polish
 - Data output is sparse at the moment. Could use more comprehensive stats
 - Limited testing on different model types and prompt categories
