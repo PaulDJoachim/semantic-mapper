@@ -47,19 +47,22 @@ class DivergentGenerator:
             self.model.set_seed(seed)
 
     def _create_child_branches(self, parent_node: TreeNode, branch_sequence: Any,
-                               representatives: List[Any], stem_length: int) -> List[Tuple[TreeNode, Any]]:
+                               clustering_result: ClusteringResult) -> List[Tuple[TreeNode, Any]]:
         """Create child nodes and new branch sequences from cluster representatives."""
+        representatives = clustering_result.representatives
+        labels = clustering_result.labels
+
         new_branches = []
-
-        # TODO replace with an actual probability distribution
-        probability = 1.0 / len(representatives) if len(representatives) > 1 else 1.0
-
-        for rep_tokens in representatives:
+        num_samples = len(labels)
+        for cluster_label, rep_tokens in representatives.items():
             child_text = self.model.decode(rep_tokens)
+            cluster_proportion = labels.count(cluster_label) / num_samples
+
             child = TreeNode(
                 token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
-                token_text=child_text, probability=probability,
-                depth=parent_node.depth + len(rep_tokens))  # Use actual length after pruning
+                token_text=child_text,
+                proportion=cluster_proportion,
+                depth=parent_node.depth + len(rep_tokens))
             parent_node.add_child(child)
 
             new_sequence = branch_sequence + rep_tokens
@@ -90,7 +93,7 @@ class DivergentGenerator:
         max_stems_per_node = max_stems_per_node or self.config.getint("generation", "max_stems_per_node")
 
         input_ids = self.model.encode(prompt)
-        root = TreeNode(token_id=-1, token_text=prompt, probability=1.0, depth=0)
+        root = TreeNode(token_id=-1, token_text=prompt, proportion=1.0, depth=0)
 
         active_branches = [(root, input_ids)]
         total_nodes = 1
@@ -116,20 +119,15 @@ class DivergentGenerator:
                     self._print_stems(stem_texts, branch_node, prompt)
 
                 print(f"Node at depth {branch_node.depth}: {total_generated} stems -> {clustering_result.num_clusters} clusters")
+                clustering_result.update_cluster_representatives(stem_tokens)
 
                 viz_data = EmbeddingTo3D.create_visualization_data(clustering_result, stem_texts)
                 branch_node.cluster_data = viz_data
 
-                representatives = self.cluster_analyzer.get_cluster_representatives(
-                    stem_tokens, clustering_result
-                )
+                child_branches = self._create_child_branches(branch_node, branch_sequence, clustering_result)
 
-                if representatives:
-                    child_branches = self._create_child_branches(
-                        branch_node, branch_sequence, representatives, stem_length
-                    )
-                    new_branches.extend(child_branches)
-                    total_nodes += len(child_branches)
+                new_branches.extend(child_branches)
+                total_nodes += len(child_branches)
 
             active_branches = new_branches
 
@@ -159,8 +157,13 @@ class DivergentGenerator:
 
         while total_generated < max_total_stems:
             # Generate current batch with entropy data
-            stems, entropies = self.model.generate_stems(branch_sequence, current_batch_size, stem_length,
-                                                       temperature=temperature, top_k=top_k, top_p=top_p)
+            stems, entropies = self.model.generate_stems(
+                input_ids=branch_sequence,
+                num_stems=current_batch_size,
+                stem_length=stem_length,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p)
 
             # Prune stems based on entropy peaks
             pruned_stems = self._prune_stems_by_entropy(stems, entropies, stem_length)
