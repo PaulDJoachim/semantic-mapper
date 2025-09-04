@@ -81,12 +81,8 @@ class Config:
         return self.get("visualization", "output_dir", "./output")
 
     @property
-    def template_path(self) -> str:
-        return self.get("visualization", "template_path", "templates/tree_template_old.html")
-
-    @property
-    def compress_linear(self) -> bool:
-        return self.getboolean("visualization", "compress_linear", True)
+    def embed_full_branch(self) -> bool:
+        return self.getboolean("embeddings", "embed_full_branch", False)
 
 
 _config_instance = None
