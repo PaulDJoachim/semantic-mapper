@@ -11,7 +11,7 @@ The goal is to reveal the primary ways in which a model might respond to a given
 This project was created as a way to learn more about the inner workings of language models. I'm not sure if it has any practical applications, but it's a fun way to explore and compare their behaviors.
 
 ![Example Gif](images/example_gif_01.gif)
-![Example Image](images/example_img_02.png)
+![Example Image](images/example_img_03.png)
 ## Current State
 
 This is very much a work in progress. The basic pipeline functions and will:
