@@ -2,7 +2,7 @@ import numpy as np
 from typing import List, Dict, Any
 from clustering.cluster_analyzer import ClusteringResult
 from sklearn.decomposition import PCA
-
+from config.config import get_config
 
 class EmbeddingTo3D:
     """Convert high-dimensional embeddings to 3D positions for visualization."""
@@ -16,7 +16,7 @@ class EmbeddingTo3D:
 
     @staticmethod
     def create_visualization_data(clustering_result: ClusteringResult,
-                                texts: List[str]) -> Dict[str, Any]:
+                                  texts: List[str]) -> Dict[str, Any]:
         """Convert clustering result to 3D visualization data."""
         if not texts or len(clustering_result.embeddings) == 0:
             return {'samples': [], 'stats': {}}
@@ -26,16 +26,14 @@ class EmbeddingTo3D:
 
         # Create samples with 3D data
         samples = []
-        for i, (text, label, pos_3d) in enumerate(zip(texts, clustering_result.labels, positions_3d)):
+        for text, label, pos_3d in zip(texts, clustering_result.labels, positions_3d):
             color = EmbeddingTo3D._get_cluster_color(label)
-            confidence = EmbeddingTo3D._estimate_confidence(clustering_result.embeddings[i], positions_3d)
 
             samples.append({
                 'text': text,
-                'direction': pos_3d.tolist(),  # Normalized to unit sphere
-                'cluster': int(label),  # Convert numpy int to Python int
+                'direction': pos_3d.tolist(),
+                'cluster': int(label),
                 'color': color,
-                'confidence': float(confidence)  # Convert numpy float to Python float
             })
 
         # Generate cluster statistics
@@ -48,7 +46,7 @@ class EmbeddingTo3D:
 
     @staticmethod
     def _embeddings_to_3d(embeddings: np.ndarray) -> np.ndarray:
-        """Reduce embeddings to 3D using PCA, normalized to unit sphere."""
+        """Reduce embeddings to 3D using PCA."""
         if embeddings.shape[0] < 3:
             # Handle edge case: pad with zeros if too few samples
             positions = np.zeros((len(embeddings), 3))
@@ -59,10 +57,14 @@ class EmbeddingTo3D:
         pca = PCA(n_components=3)
         positions_3d = pca.fit_transform(embeddings)
 
-        # Normalize to unit sphere for consistent visualization
-        norms = np.linalg.norm(positions_3d, axis=1, keepdims=True)
-        norms = np.where(norms == 0, 1, norms)  # Avoid division by zero
-        return positions_3d / norms
+        pca_normalization = get_config().get("visualization", "pca_normalization")
+        if pca_normalization == 'unit_sphere':
+            # Normalize to unit sphere for consistent visualization
+            norms = np.linalg.norm(positions_3d, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)  # Avoid division by zero
+            return positions_3d / norms
+        else:
+            return positions_3d
 
     @staticmethod
     def _get_cluster_color(cluster_id: int) -> str:
@@ -70,14 +72,6 @@ class EmbeddingTo3D:
         if cluster_id == -1:
             return EmbeddingTo3D.NOISE_COLOR
         return EmbeddingTo3D.CLUSTER_COLORS[cluster_id % len(EmbeddingTo3D.CLUSTER_COLORS)]
-
-    @staticmethod
-    def _estimate_confidence(embedding: np.ndarray, all_positions: np.ndarray) -> float:
-        """Estimate confidence based on embedding magnitude."""
-        # Simple heuristic: longer embeddings = higher confidence
-        magnitude = np.linalg.norm(embedding)
-        # Normalize to 0-1 range based on typical embedding magnitudes
-        return min(1.0, magnitude / 10.0)
 
     @staticmethod
     def _generate_cluster_stats(labels: List[int]) -> Dict[str, int]:
