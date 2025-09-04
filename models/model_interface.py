@@ -30,11 +30,6 @@ def get_model(model_name: str = None, **kwargs) -> ModelInterface:
     if model_name == "mock":
         from models.mock_model import MockModel
         return MockModel(**kwargs)
-
-    elif model_name == "gpt2-xl":
-        from models.gpt_two import GPT2Interface
-        return GPT2Interface(model_name, **kwargs)
-
     else:
         try:
             from models.generic_transformer import GenericTransformer
@@ -61,19 +56,22 @@ def get_embedder(embedding_model: str = None, **kwargs):
 
 
 def get_grouper(clustering_type: str = None, **kwargs):
+    cluster_kwargs = kwargs.get('cluster_kwargs', {})
+
     if clustering_type == "mock":
         from clustering.mock_clustering import MockClusterAnalyzer
-        cluster_analyzer = MockClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
+        return MockClusterAnalyzer(**cluster_kwargs)
     elif clustering_type == "dbscan":
         from clustering.dbscan_clustering import DBSCANClusterAnalyzer
-        cluster_analyzer = DBSCANClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
+        return DBSCANClusterAnalyzer(**cluster_kwargs)
     elif clustering_type == "hierarchical":
         from clustering.hierarchical_clustering import HierarchicalAnalyzer
-        cluster_analyzer = HierarchicalAnalyzer(**kwargs.get('cluster_kwargs', {}))
+        return HierarchicalAnalyzer(**cluster_kwargs)
+    elif clustering_type == "optics":
+        from clustering.optics_clustering import OPTICSClusterAnalyzer
+        return OPTICSClusterAnalyzer(**cluster_kwargs)
     else:
         raise ValueError(f"Unknown clustering type: {clustering_type}")
-
-    return cluster_analyzer
 
 
 def create_generator(inference_model: str, embedding_model: str, cluster_type: str, **kwargs):

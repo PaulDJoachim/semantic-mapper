@@ -9,21 +9,28 @@ class GenericTransformer(ModelInterface):
     """Interface wrapper for transformer models"""
 
     def __init__(self, model_name: str, device: str = None):
-        config = get_config()
-        self.set_seed(config.getint("generation", "seed"))
+        self.config = get_config()
+        self.set_seed(self.config.getint("generation", "seed"))
 
         self.device = torch.device(
-            device or config.device if torch.cuda.is_available() else "cpu"
+            device or self.config.device if torch.cuda.is_available() else "cpu"
         )
 
         model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(model_name)
 
-        self.tokenizer.pad_token = self.tokenizer.unk_token  # Use unk token as pad
-
         # Move model to the specified device
         self.model = self.model.to(self.device)
+
+        # Set pad token to be different from eos token to avoid attention mask issues
+        self.tokenizer.pad_token = self.tokenizer.unk_token  # Use unk token as pad
+        if self.tokenizer.pad_token is None:
+            # If no unk token, add a new pad token
+            self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+            self.model.resize_token_embeddings(len(self.tokenizer))
+
+        # set to eval mode
         self.model.eval()
 
     def set_seed(self, seed: int) -> None:
@@ -47,7 +54,7 @@ class GenericTransformer(ModelInterface):
     def generate_stems(self, input_ids: List[int], num_stems: int, stem_length: int,
                       temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0) -> Tuple[List[List[int]], List[List[float]]]:
         """
-        Generate multiple continuation stems with per-token entropy data.
+        Generate multiple continuation stems with per-token entropy and probability data.
 
         Args:
             input_ids: List of input token IDs
@@ -58,12 +65,13 @@ class GenericTransformer(ModelInterface):
             top_p: Nucleus sampling threshold (1.0 = no filtering)
 
         Returns:
-            Tuple of (generated_token_lists, entropy_lists)
+            Tuple of (generated_token_lists, entropy_lists, probability_lists)
+            - probability_lists: List of probabilities for the tokens that were actually selected
+              Shape: [num_stems][stem_length]
         """
-        config = get_config()
         stems = []
         entropies = []
-        batch_size = config.getint("generation", "batch_size")
+        batch_size = self.config.getint("generation", "batch_size")
 
         with torch.no_grad():
             for batch_start in range(0, num_stems, batch_size):
@@ -79,7 +87,7 @@ class GenericTransformer(ModelInterface):
                     input_ids=input_tensor,
                     attention_mask=attention_mask,
                     max_new_tokens=stem_length,
-                    min_new_tokens=stem_length,  # Force exact length
+                    # min_new_tokens=stem_length,  # Force exact length
                     num_return_sequences=current_batch_size,  # Use actual batch size
                     temperature=temperature if temperature > 0 else 1e-7,
                     top_k=top_k if top_k > 0 else None,
@@ -99,12 +107,13 @@ class GenericTransformer(ModelInterface):
                 # Calculate entropy from scores
                 batch_entropies = self._calculate_entropies(outputs.scores)
 
-                # Convert to lists and add to results
-                for i in range(current_batch_size):
-                    generated_tokens = generated_portions[i].tolist()
-                    token_entropies = batch_entropies[i].tolist()
-                    stems.append(generated_tokens)
-                    entropies.append(token_entropies)
+                # Convert tensors to lists
+                batch_stems = generated_portions.tolist()
+                batch_entropies_list = batch_entropies.tolist()
+
+                # Extend results lists
+                stems.extend(batch_stems)
+                entropies.extend(batch_entropies_list)
 
                 # Memory cleanup
                 del outputs
@@ -120,18 +129,12 @@ class GenericTransformer(ModelInterface):
 
     def _calculate_entropies(self, scores: Tuple[torch.Tensor]) -> torch.Tensor:
         """Calculate per-token entropy from generation scores."""
-        # scores is a tuple of tensors, one for each generation step
-        # Each tensor has shape (batch_size, vocab_size)
-        entropies_per_step = []
+        # Stack all step scores: (num_steps, batch_size, vocab_size)
+        stacked_scores = torch.stack(scores, dim=0)
 
-        for step_scores in scores:
-            # Convert logits to probabilities
-            probs = torch.softmax(step_scores, dim=-1)
-            # Calculate entropy: -sum(p * log(p))
-            entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=-1)
-            entropies_per_step.append(entropy)
+        # Compute probabilities and entropy for all steps
+        probs = torch.softmax(stacked_scores, dim=-1)
+        entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=-1)
 
-        # Stack to get shape (num_steps, batch_size)
-        entropies = torch.stack(entropies_per_step, dim=0)
-        # Transpose to get shape (batch_size, num_steps)
-        return entropies.transpose(0, 1)
+        # Transpose to (batch_size, num_steps)
+        return entropy.transpose(0, 1)
