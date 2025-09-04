@@ -30,7 +30,7 @@ class ClusterVisualizer {{
         this.scene.background = new THREE.Color(0x111111);
 
         const rect = this.canvas.getBoundingClientRect();
-        this.camera = new THREE.PerspectiveCamera(75, rect.width / rect.height, 0.1, 1000);
+        this.camera = new THREE.PerspectiveCamera(60, rect.width / rect.height, 0.1, 1000);
 
         this.resetCamera();
 
@@ -62,7 +62,7 @@ class ClusterVisualizer {{
     }}
 
     resetCamera() {{
-        this.camera.position.set(1.2, 1.0, 1.2);
+        this.camera.position.set(.8, 0.6, .8);
         this.camera.lookAt(0, 0, 0);
     }}
 
@@ -74,6 +74,12 @@ class ClusterVisualizer {{
 
         this.canvas.addEventListener('mousedown', (e) => {{
             isDragging = false;
+            this.isRotating = false;
+            previousMouse = {{ x: e.offsetX, y: e.offsetY }};
+        }});
+
+        this.canvas.addEventListener('mouseup', (e) => {{
+            this.isRotating = true;
             previousMouse = {{ x: e.offsetX, y: e.offsetY }};
         }});
 
@@ -115,8 +121,7 @@ class ClusterVisualizer {{
 
         clusterData.samples.forEach(sample => {{
             const direction = new THREE.Vector3(...sample.direction);
-            const rayLength = 0.6 + sample.confidence * 0.4;
-            const endPoint = direction.multiplyScalar(rayLength);
+            const endPoint = direction.multiplyScalar(1);
 
             const rayGeo = new THREE.BufferGeometry();
             rayGeo.setFromPoints([new THREE.Vector3(0, 0, 0), endPoint]);
@@ -130,7 +135,7 @@ class ClusterVisualizer {{
             const ray = new THREE.Line(rayGeo, rayMat);
             this.rayGroup.add(ray);
 
-            const sphereGeo = new THREE.SphereGeometry(0.015, 8, 8);
+            const sphereGeo = new THREE.SphereGeometry(0.01, 8, 8);
             const sphereMat = new THREE.MeshPhongMaterial({{ color: sample.color }});
             const sphere = new THREE.Mesh(sphereGeo, sphereMat);
             sphere.position.copy(endPoint);
@@ -366,18 +371,18 @@ class TreeVisualizer {{
     getPathToNode(nodeId) {{
         const path = [];
         let currentNode = this.nodes[nodeId];
-        
+
         // Traverse up the tree to collect all tokens
         while (currentNode) {{
             path.unshift(currentNode.text); // Add to beginning of array
-            
+
             if (currentNode.parentId !== null) {{
                 currentNode = this.nodes[currentNode.parentId];
             }} else {{
                 break;
             }}
         }}
-        
+
         return path;
     }}
 
@@ -385,7 +390,7 @@ class TreeVisualizer {{
     getPathWithSelection(nodeId) {{
         const pathTokens = this.getPathToNode(nodeId);
         const selectedToken = this.nodes[nodeId].text;
-        
+
         return {{
             fullPath: pathTokens.join(''),
             selectedToken: selectedToken,
@@ -441,10 +446,10 @@ class TreeVisualizer {{
     showSelectionData(node) {{
         document.getElementById('no-selection').classList.add('hidden');
         document.getElementById('cluster-content').classList.remove('hidden');
-        
+
         // Get path information with selection details
         const pathInfo = this.getPathWithSelection(node.id);
-        
+
         // Create HTML with bold selected token
         const selectedNodeElement = document.getElementById('selected-node-text');
         selectedNodeElement.innerHTML = `"${{pathInfo.pathBeforeSelected}}<strong>${{pathInfo.selectedToken}}</strong>"`;
@@ -508,7 +513,7 @@ class TreeVisualizer {{
             // Node has no cluster data - show basic info
             document.getElementById('cluster-stats').innerHTML = '<div class="cluster-info">No cluster data available for this node.</div>';
             document.getElementById('cluster-samples').innerHTML = '';
-            
+
             // Clear the 3D viewer
             if (this.clusterViewer) {{
                 this.clusterViewer.clear();
@@ -517,7 +522,7 @@ class TreeVisualizer {{
     }}
 
     hideClusterData() {{
-        document.getElementById('no-selection').classList.remove('hidden');
+        document.getElementById('no-selection').classList.add('hidden');
         document.getElementById('cluster-content').classList.add('hidden');
         if (this.clusterViewer) {{
             this.clusterViewer.clear();
@@ -570,7 +575,7 @@ class TreeVisualizer {{
             x: x,
             y: y,
             text: node.token_text,
-            probability: node.probability,
+            proportion: node.proportion,
             depth: node.depth,
             level: level,
             parentId: parentId,
@@ -587,7 +592,7 @@ class TreeVisualizer {{
             const effectiveRadius = baseRadius * this.viewState.nodeScale;
             const levelFactor = Math.pow(0.6, level-1); // Tighter at deeper levels
             const maxAngleSpread = level === 0 ? Math.PI * 1.5 : Math.PI * 0.9;
-            const minAngleSpread = 0.4;
+            const minAngleSpread = 0.5;
             const angleSpread = Math.min(maxAngleSpread, Math.max(minAngleSpread, childCount * 0.2 * levelFactor));
             const startAngle = parentAngle - angleSpread / 2;
 
@@ -611,7 +616,7 @@ class TreeVisualizer {{
             x: x,
             y: y,
             text: node.token_text,
-            probability: node.probability,
+            proportion: node.proportion,
             depth: node.depth,
             level: level,
             parentId: parentId,
@@ -744,7 +749,9 @@ class TreeVisualizer {{
             const fromScreen = this.worldToScreen(fromNode.x, fromNode.y);
             const toScreen = this.worldToScreen(toNode.x, toNode.y);
 
-            let alpha = Math.max(0.3, toNode.probability);
+            // Scale proportion values to a more visible range
+            // 0.04 -> ~0.2, 0.3 -> ~0.8, 1.0 -> 1.0
+            let alpha = Math.min(1.0, 0.1 + (toNode.proportion * 0.9));
             let lineWidth = Math.max(1, 2 * this.viewState.zoom);
 
             if (isHighlighted) {{
@@ -767,6 +774,22 @@ class TreeVisualizer {{
                 this.ctx.lineTo(toScreen.x, toScreen.y);
             }}
             this.ctx.stroke();
+
+            // Add proportion label on edge
+            if (this.viewState.zoom > 0.5) {{ // Only show labels when zoomed in enough
+                const midX = (fromScreen.x + toScreen.x) / 2;
+                const midY = (fromScreen.y + toScreen.y) / 2;
+
+                const labelFontSize = Math.max(6, 5 * this.viewState.zoom);
+                this.ctx.font = `${{labelFontSize}}px Arial`;
+                this.ctx.fillStyle = `rgba(255, 255, 0, ${{Math.min(1, alpha + 0.3)}})`;
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+
+                // Format proportion to 2 decimal places
+                const proportionText = toNode.proportion.toFixed(2);
+                this.ctx.fillText(proportionText, midX, midY);
+            }}
         }});
     }}
 
@@ -800,9 +823,9 @@ class TreeVisualizer {{
 
         // Adjust appearance based on highlight state
         if (isHighlighted) {{
-            lightness = Math.min(75, lightness + 5); // Brighter
+            lightness = Math.min(75, lightness); // Brighter
         }} else if (this.highlightedNodes.size > 0) {{
-            lightness = Math.max(10, lightness - 50); // Dimmer
+            lightness = Math.max(10, lightness - 65); // Dimmer
         }}
 
         const color = `hsl(${{hue}}, ${{saturation}}%, ${{lightness}}%)`;
