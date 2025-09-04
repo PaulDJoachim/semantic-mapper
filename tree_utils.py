@@ -8,7 +8,7 @@ class TreeNode:
     """Represents a single point in the generation tree with cluster visualization data."""
     token_id: int
     token_text: str
-    probability: float
+    proportion: float
     depth: int
     parent: Optional['TreeNode'] = None
     children: List['TreeNode'] = field(default_factory=list)
@@ -117,7 +117,7 @@ class TreeOperations:
             cluster_info = ""
             if node.cluster_data:
                 cluster_info = f" [{node.cluster_data['num_clusters']} clusters]"
-            print(f"{prefix}{connector}{repr(node.token_text)} (p={node.probability:.3f}, d={node.depth}){cluster_info}")
+            print(f"{prefix}{connector}{repr(node.token_text)} (p={node.proportion:.3f}, d={node.depth}){cluster_info}")
             prefix += "    " if is_last else "│   "
 
         for i, child in enumerate(node.children):
@@ -129,7 +129,7 @@ class TreeOperations:
         node_dict = {
             "token_id": node.token_id,
             "token_text": node.token_text,
-            "probability": node.probability,
+            "proportion": node.proportion,
             "depth": node.depth,
             "children": [TreeOperations.to_dict(child, compress_linear) for child in node.children]
         }
