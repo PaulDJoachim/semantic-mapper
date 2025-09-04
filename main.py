@@ -21,7 +21,13 @@ def main():
     printer = TreePrinter()
 
     test_prompts = [
-        "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is"]
+        # "The primary purpose of education is to",
+        # "The maximum airspeed velocity of an unladen swallow is",
+        "When you drop a ball, it will always",
+        # "Peanut butter cookies are a delicious autumn treat! Here's a recipe that you can try at home. Start by",
+        "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is",
+        # "Out of all the animals that have ever existed, my favorite one is undoubtedly the"
+    ]
 
     for prompt in test_prompts:
         print(f"\n{'='*70}")
