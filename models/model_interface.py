@@ -27,53 +27,34 @@ def get_model(model_name: str = None, **kwargs) -> ModelInterface:
     """Create model instance of specified type."""
     model_name = model_name
 
-    if model_name == "mock":
-        from models.mock_model import MockModel
-        return MockModel(**kwargs)
+    try:
+        from models.generic_transformer import GenericTransformer
+        return GenericTransformer(model_name, **kwargs)
 
-    elif model_name == "gpt2-xl":
-        from models.gpt_two import GPT2Interface
-        return GPT2Interface(model_name, **kwargs)
-
-    else:
-        try:
-            from models.generic_transformer import GenericTransformer
-            return GenericTransformer(model_name, **kwargs)
-
-        except ValueError:
-            raise ValueError(f"Unknown model: {model_name}")
+    except ValueError:
+        raise ValueError(f"Unknown model: {model_name}")
 
 
 def get_embedder(embedding_model: str = None, **kwargs):
     """Create embedding model of specified type."""
 
-    if embedding_model == "mock":
-        from semantic_embedding.mock_embedding import MockEmbeddingProvider
-        embedding_provider = MockEmbeddingProvider(**kwargs.get('embedding_kwargs', {}))
-    else:
-        try:
-            from semantic_embedding.sentence_embedding import SentenceEmbeddingProvider
-            embedding_provider = SentenceEmbeddingProvider(model_name=embedding_model, **kwargs.get('embedding_kwargs', {}))
-        except ValueError:
-            raise ValueError(f"Unknown embedding model: {embedding_model}")
+    try:
+        from semantic_embedding.sentence_embedding import SentenceEmbeddingProvider
+        embedding_provider = SentenceEmbeddingProvider(model_name=embedding_model, **kwargs.get('embedding_kwargs', {}))
+    except ValueError:
+        raise ValueError(f"Unknown embedding model: {embedding_model}")
 
     return embedding_provider
 
 
 def get_grouper(clustering_type: str = None, **kwargs):
-    if clustering_type == "mock":
-        from clustering.mock_clustering import MockClusterAnalyzer
-        cluster_analyzer = MockClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
-    elif clustering_type == "dbscan":
-        from clustering.dbscan_clustering import DBSCANClusterAnalyzer
-        cluster_analyzer = DBSCANClusterAnalyzer(**kwargs.get('cluster_kwargs', {}))
-    elif clustering_type == "hierarchical":
+    cluster_kwargs = kwargs.get('cluster_kwargs', {})
+
+    if clustering_type == "hierarchical":
         from clustering.hierarchical_clustering import HierarchicalAnalyzer
-        cluster_analyzer = HierarchicalAnalyzer(**kwargs.get('cluster_kwargs', {}))
+        return HierarchicalAnalyzer(**cluster_kwargs)
     else:
         raise ValueError(f"Unknown clustering type: {clustering_type}")
-
-    return cluster_analyzer
 
 
 def create_generator(inference_model: str, embedding_model: str, cluster_type: str, **kwargs):

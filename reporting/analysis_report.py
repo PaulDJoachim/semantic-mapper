@@ -78,7 +78,7 @@ class AnalysisReport:
             if node.cluster_data and 'samples' in node.cluster_data:
                 cluster_nodes.append({
                     'node_text': node.token_text,
-                    'depth': node.depth,
+                    'token_depth': node.token_depth,
                     'num_samples': len(node.cluster_data['samples'])
                 })
                 all_samples.extend(node.cluster_data['samples'])

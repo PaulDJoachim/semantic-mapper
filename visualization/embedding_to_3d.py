@@ -1,7 +1,8 @@
 import numpy as np
 from typing import List, Dict, Any
-from clustering.cluster_analyzer import ClusteringResult
+from clustering.cluster_analyzer import Cluster
 from sklearn.decomposition import PCA
+from config.config import get_config
 
 
 class EmbeddingTo3D:
@@ -15,31 +16,50 @@ class EmbeddingTo3D:
     NOISE_COLOR = '#c1bbb9'
 
     @staticmethod
-    def create_visualization_data(clustering_result: ClusteringResult,
-                                texts: List[str]) -> Dict[str, Any]:
-        """Convert clustering result to 3D visualization data."""
-        if not texts or len(clustering_result.embeddings) == 0:
-            return {'samples': [], 'stats': {}}
+    def create_visualization_data(cluster_list: List[Cluster]) -> Dict[str, Any]:
+        """Convert cluster list to 3D visualization data."""
 
-        # Generate 3D positions
-        positions_3d = EmbeddingTo3D._embeddings_to_3d(clustering_result.embeddings)
+        # Get shared data from first cluster
+        stem_pack = cluster_list[0].stem_pack
+        mean_entropy = stem_pack.mean_entropy
+        all_embeddings = stem_pack.delta_embeddings
+        texts = stem_pack.texts
+        n_samples = len(all_embeddings)
 
-        # Create samples with 3D data
+        # Convert to 3D once
+        positions_3d = EmbeddingTo3D._embeddings_to_3d(all_embeddings)
+
+        # TODO: move color stuff to frontend
+        # Pre-compute color mapping for unique cluster IDs
+        unique_labels = set()
+        for cluster in cluster_list:
+            unique_labels.add(cluster.label)
+        unique_labels.add(-1)  # Add noise label
+
+        color_map = {label: EmbeddingTo3D._get_cluster_color(label) for label in unique_labels}
+
+        # Build cluster labels array
+        cluster_labels = np.full(n_samples, -1, dtype=int)  # Initialize with noise
+        for cluster in cluster_list:
+            cluster_labels[cluster.cluster_mask] = cluster.label
+
+        # color assignment
+        colors = np.array([color_map[label] for label in cluster_labels])
+
+        # Convert all positions to lists at once (more efficient than per-row conversion)
+        directions_list = positions_3d.tolist()
+
+        # Build samples list
         samples = []
-        for i, (text, label, pos_3d) in enumerate(zip(texts, clustering_result.labels, positions_3d)):
-            color = EmbeddingTo3D._get_cluster_color(label)
-            confidence = EmbeddingTo3D._estimate_confidence(clustering_result.embeddings[i], positions_3d)
-
+        for i in range(n_samples):
             samples.append({
-                'text': text,
-                'direction': pos_3d.tolist(),  # Normalized to unit sphere
-                'cluster': int(label),  # Convert numpy int to Python int
-                'color': color,
-                'confidence': float(confidence)  # Convert numpy float to Python float
+                'text': texts[i] + f'[{mean_entropy[i]:.2f}]',
+                'direction': directions_list[i],
+                'cluster': int(cluster_labels[i]),
+                'color': colors[i],
             })
 
-        # Generate cluster statistics
-        stats = EmbeddingTo3D._generate_cluster_stats(clustering_result.labels)
+        stats = EmbeddingTo3D._generate_cluster_stats(cluster_labels)
 
         return {
             'samples': samples,
@@ -48,7 +68,7 @@ class EmbeddingTo3D:
 
     @staticmethod
     def _embeddings_to_3d(embeddings: np.ndarray) -> np.ndarray:
-        """Reduce embeddings to 3D using PCA, normalized to unit sphere."""
+        """Reduce embeddings to 3D using PCA."""
         if embeddings.shape[0] < 3:
             # Handle edge case: pad with zeros if too few samples
             positions = np.zeros((len(embeddings), 3))
@@ -59,10 +79,14 @@ class EmbeddingTo3D:
         pca = PCA(n_components=3)
         positions_3d = pca.fit_transform(embeddings)
 
-        # Normalize to unit sphere for consistent visualization
-        norms = np.linalg.norm(positions_3d, axis=1, keepdims=True)
-        norms = np.where(norms == 0, 1, norms)  # Avoid division by zero
-        return positions_3d / norms
+        pca_normalization = get_config().get("visualization", "pca_normalization")
+        if pca_normalization == 'unit_sphere':
+            # Normalize to unit sphere for consistent visualization
+            norms = np.linalg.norm(positions_3d, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)  # Avoid division by zero
+            return positions_3d / norms
+        else:
+            return positions_3d
 
     @staticmethod
     def _get_cluster_color(cluster_id: int) -> str:
@@ -72,18 +96,11 @@ class EmbeddingTo3D:
         return EmbeddingTo3D.CLUSTER_COLORS[cluster_id % len(EmbeddingTo3D.CLUSTER_COLORS)]
 
     @staticmethod
-    def _estimate_confidence(embedding: np.ndarray, all_positions: np.ndarray) -> float:
-        """Estimate confidence based on embedding magnitude."""
-        # Simple heuristic: longer embeddings = higher confidence
-        magnitude = np.linalg.norm(embedding)
-        # Normalize to 0-1 range based on typical embedding magnitudes
-        return min(1.0, magnitude / 10.0)
-
-    @staticmethod
-    def _generate_cluster_stats(labels: List[int]) -> Dict[str, int]:
+    def _generate_cluster_stats(labels: np.ndarray) -> Dict[str, int]:
         """Generate cluster statistics for UI display."""
+        unique_labels, counts = np.unique(labels, return_counts=True)
         stats = {}
-        for label in labels:
+        for label, count in zip(unique_labels, counts):
             key = 'noise' if label == -1 else f'cluster_{label}'
-            stats[key] = stats.get(key, 0) + 1
+            stats[key] = int(count)
         return stats

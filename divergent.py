@@ -1,8 +1,10 @@
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Any, Tuple
 from tree_utils import TreeNode, TreeOperations
-from models.model_interface import ModelInterface
-from semantic_embedding.embedding_provider import EmbeddingProvider
-from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
+from semantic_embedding.embedding_provider import EmbeddingProvider, get_delta_embeddings
+from utilities.cluster_reps import assign_cluster_representatives
+from utilities.entropy_distance import get_entropy_distance_mask
+from models.generic_transformer import GenericTransformer
+from clustering.cluster_analyzer import ClusterAnalyzer, Cluster
 from config.config import get_config
 from reporting.analysis_report import AnalysisReport
 from visualization.embedding_to_3d import EmbeddingTo3D
@@ -12,7 +14,7 @@ import numpy as np
 class DivergentGenerator:
     """Generates text trees by exploring semantic branching points."""
 
-    def __init__(self, inference_model: ModelInterface,
+    def __init__(self, inference_model: GenericTransformer,
                  embedding_provider: EmbeddingProvider,
                  cluster_analyzer: ClusterAnalyzer):
 
@@ -46,196 +48,137 @@ class DivergentGenerator:
         if hasattr(self.model, 'set_seed'):
             self.model.set_seed(seed)
 
-    def _create_child_branches(self, parent_node: TreeNode, branch_sequence: Any,
-                               representatives: List[Any], stem_length: int) -> List[Tuple[TreeNode, Any]]:
-        """Create child nodes and new branch sequences from cluster representatives."""
-        new_branches = []
+    def generate_tree(self, prompt: str) -> TreeNode:
+        """Explore semantic branching by generating and clustering stems."""
 
-        # TODO replace with an actual probability distribution
-        probability = 1.0 / len(representatives) if len(representatives) > 1 else 1.0
+        self.set_seed(self.config.getint("generation", "seed"))
 
-        for rep_tokens in representatives:
-            child_text = self.model.decode(rep_tokens)
-            child = TreeNode(
-                token_id=rep_tokens[0] if hasattr(rep_tokens, '__getitem__') else 0,
-                token_text=child_text, probability=probability,
-                depth=parent_node.depth + len(rep_tokens))  # Use actual length after pruning
-            parent_node.add_child(child)
+        # max_depth = self.config.max_depth
+        max_entropy_depth = self.config.max_entropy_depth
+        entropy_budget = self.config.entropy_budget
+        gap_threshold = self.config.max_proportion_gap
+        stem_length = self.config.stem_length
+        num_stems = self.config.num_stems
+        temperature = self.config.temperature
+        normalize_pre_delta = self.config.normalize_pre_delta
+        normalize_post_delta = self.config.normalize_post_delta
+        top_k = self.config.top_k
+        top_p = self.config.top_p
 
-            new_sequence = branch_sequence + rep_tokens
-            new_branches.append((child, new_sequence))
-
-        return new_branches
-
-    def explore_topology(self, prompt: str,
-                         max_depth: int = None,
-                         stem_length: int = None,
-                         num_stems: int = None,
-                         temperature: float = None,
-                         top_k: int = None,
-                         top_p: float = None,
-                         max_stems_per_node: int = None,
-                         print_stems: bool = False,
-                         seed: int = None) -> TreeNode:
-        """Explores semantic branching by generating and clustering stems."""
-        if seed is not None:
-            self.set_seed(seed)
-
-        max_depth = max_depth or self.config.max_depth
-        stem_length = stem_length or self.config.getint("generation", "stem_length")
-        num_stems = num_stems or self.config.getint("generation", "num_stems")
-        temperature = temperature if temperature is not None else self.config.getfloat("generation", "temperature")
-        top_k = top_k if top_k is not None else self.config.getint("generation", "top_k")
-        top_p = top_p if top_p is not None else self.config.getfloat("generation", "top_p")
-        max_stems_per_node = max_stems_per_node or self.config.getint("generation", "max_stems_per_node")
-
+        #  encode initial prompt into tokens
         input_ids = self.model.encode(prompt)
-        root = TreeNode(token_id=-1, token_text=prompt, probability=1.0, depth=0)
+        prompt_embedding = self.embedding_provider.get_embeddings([prompt], normalize_pre_delta)
+        # create root node
+        root_node = TreeNode(token_id=-1,
+                             tokens=input_ids,
+                             token_text=prompt,
+                             semantic_embedding=prompt_embedding[0],
+                             proportion=1.0,
+                             token_depth=0,
+                             entropy_depth=0)
 
-        active_branches = [(root, input_ids)]
-        total_nodes = 1
+        active_nodes = [root_node]
 
-        while active_branches and any(branch[0].depth < max_depth for branch in active_branches):
-            new_branches = []
+        while active_nodes and any(node.entropy_depth < max_entropy_depth for node in active_nodes):
+            new_nodes = []
 
-            for branch_node, branch_sequence in active_branches:
-                if branch_node.depth >= max_depth:
-                    new_branches.append((branch_node, branch_sequence))
+            for this_node in active_nodes:
+                # if node has reached max depth, add it to the tree without generating
+                if this_node.entropy_depth >= max_entropy_depth:
+                    new_nodes.append(this_node)
                     continue
 
-                stem_tokens, stem_texts, clustering_result, total_generated = (
-                    self._generate_stems_until_clustered(branch_sequence,
-                                                         num_stems,
-                                                         stem_length,
-                                                         temperature,
-                                                         top_k,
-                                                         top_p,
-                                                         max_stems_per_node))
+                # Generate stems
+                token_arr, entropy_arr = self.model.generate_stems(
+                    input_ids=this_node.get_token_sequence(),
+                    num_stems=num_stems,
+                    stem_length=stem_length,
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p)
 
-                if print_stems:
-                    self._print_stems(stem_texts, branch_node, prompt)
+                stem_pack = this_node.stem_pack
+                stem_pack.tokens = token_arr
+                stem_pack.entropies = entropy_arr
 
-                print(f"Node at depth {branch_node.depth}: {total_generated} stems -> {clustering_result.num_clusters} clusters")
+                # Create attention mask for decoder and decode
+                stem_pack.entropy_mask, stem_pack.entropy_sums = get_entropy_distance_mask(stem_pack.entropies, entropy_budget)
+                stem_pack.texts = self.model.masked_batch_decode(stem_pack)
 
-                viz_data = EmbeddingTo3D.create_visualization_data(clustering_result, stem_texts)
-                branch_node.cluster_data = viz_data
+                parent_text = this_node.get_text_sequence() + " "
+                text_with_parent_arr = np.char.add(parent_text, stem_pack.texts)
 
-                representatives = self.cluster_analyzer.get_cluster_representatives(
-                    stem_tokens, clustering_result
-                )
+                stem_pack.embeddings = self.embedding_provider.get_embeddings(text_with_parent_arr, normalize_pre_delta)
+                stem_pack.delta_embeddings = get_delta_embeddings(stem_pack.embeddings, this_node.semantic_embedding, normalize_post_delta)
 
-                if representatives:
-                    child_branches = self._create_child_branches(
-                        branch_node, branch_sequence, representatives, stem_length
-                    )
-                    new_branches.extend(child_branches)
-                    total_nodes += len(child_branches)
+                this_node.child_clusters = self.cluster_analyzer.analyze_clusters(stem_pack)
 
-            active_branches = new_branches
+                print(f"Node at entropy depth {this_node.entropy_depth:.2f}: {len(stem_pack.texts)} stems -> {len(this_node.child_clusters)} clusters")
 
-            if total_nodes % 10 == 0:
-                print(f"Explored {total_nodes} nodes...")
+                # TODO: this_node.assign_cluster_representatives()
+                assign_cluster_representatives(this_node.child_clusters)
 
-        return root
+                viz_data = EmbeddingTo3D.create_visualization_data(this_node.child_clusters)
+                this_node.cluster_data = viz_data
+                filtered_clusters = self._filter_noise_clusters(this_node.child_clusters)
+                filtered_clusters = self._filter_by_gap_threshold(filtered_clusters, gap_threshold)
+                child_nodes = self._create_child_nodes(this_node, filtered_clusters)
+                new_nodes.extend(child_nodes)
 
-    def _generate_stems_until_clustered(self, branch_sequence: Any,
-                                        initial_num_stems: int,
-                                        stem_length: int,
-                                        temperature: float,
-                                        top_k: int,
-                                        top_p: float,
-                                        max_total_stems: int = 2000) -> Tuple[List[Any], List[str], ClusteringResult, int]:
-        """
-        Generate stems iteratively until clusters are found or max limit reached.
+                this_node.clean_stem_pack()
 
-        Returns:
-            tuple of (stem_tokens, stem_texts, clustering_result, total_stems_generated)
-        """
-        all_stem_tokens = []
-        all_stem_texts = []
-        all_stem_embeddings = None
-        current_batch_size = initial_num_stems
-        total_generated = 0
+            active_nodes = new_nodes
 
-        while total_generated < max_total_stems:
-            # Generate current batch with entropy data
-            stems, entropies = self.model.generate_stems(branch_sequence, current_batch_size, stem_length,
-                                                       temperature=temperature, top_k=top_k, top_p=top_p)
+        return root_node
 
-            # Prune stems based on entropy peaks
-            pruned_stems = self._prune_stems_by_entropy(stems, entropies, stem_length)
+    def _create_child_nodes(self, parent_node: TreeNode, cluster_list: List[Cluster]) -> List[Tuple[TreeNode, Any]]:
+        entropy_budget = self.config.getfloat("generation", "entropy_budget")
 
-            # Extract texts and embeddings
-            batch_texts = [self.model.decode(tokens) for tokens in pruned_stems]
-            batch_embeddings = self.embedding_provider.get_embeddings(batch_texts)
+        new_nodes = []
+        for cluster in cluster_list:
+            proportion = cluster.size / self.config.getint("generation", "num_stems")
+            child_text = self.model.decode(cluster.representative_sequence)
 
-            # Add to accumulated results
-            all_stem_tokens.extend(pruned_stems)
-            all_stem_texts.extend(batch_texts)
+            child = TreeNode(
+                token_id=cluster.representative_sequence[0],
+                tokens=cluster.representative_sequence,
+                token_text=child_text,
+                semantic_embedding=cluster.representative_semantic_embedding,
+                proportion=proportion,
+                token_depth=parent_node.token_depth + len(cluster.representative_sequence),
+                entropy_depth=parent_node.entropy_depth + cluster.representative_entropy
+            )
+            parent_node.add_child(child)
 
-            if all_stem_embeddings is None:
-                all_stem_embeddings = batch_embeddings
-            else:
-                all_stem_embeddings = np.concatenate(
-                    [all_stem_embeddings, batch_embeddings], axis=0)
+            new_nodes.append(child)
 
-            total_generated += current_batch_size
+        return new_nodes
 
-            clustering_result = self.cluster_analyzer.analyze_clusters(all_stem_embeddings)
+    def _filter_by_gap_threshold(self, cluster_list: List[Cluster], gap_threshold: float) -> List[Cluster]:
+        """Filter clusters by gap threshold, keeping those within threshold of next largest."""
+        if not cluster_list:
+            return []
 
-            if clustering_result.num_clusters > 0:
-                # Found clusters, we're done
-                break
+        total_samples = sum(cluster.size for cluster in cluster_list)
 
-            if total_generated >= max_total_stems:
-                # Hit maximum, stop here
-                break
+        # Calculate proportions and sort by size descending
+        cluster_proportions = [(cluster.size / total_samples, cluster) for cluster in cluster_list]
+        sorted_clusters = sorted(cluster_proportions, key=lambda x: x[0], reverse=True)
 
-            # No clusters found, double the batch size for next iteration
-            current_batch_size = min(current_batch_size * 2, max_total_stems - total_generated)
-            print(f"No clusters found with {total_generated} stems, generating {current_batch_size} more...")
+        proportions = np.array([item[0] for item in sorted_clusters])
+        gaps = proportions[:-1] - proportions[1:]
 
-        return all_stem_tokens, all_stem_texts, clustering_result, total_generated
+        # Find cutoff point
+        large_gaps = np.where(gaps > gap_threshold)[0]
+        cutoff_idx = large_gaps[0] + 1 if len(large_gaps) > 0 else len(sorted_clusters)
 
-    def _prune_stems_by_entropy(self, stems: List[List[int]], entropies: List[List[float]],
-                               original_stem_length: int) -> List[List[int]]:
-        """Prune stems at token entropy peaks."""
-        prune_range = self.config.getfloat("generation", "prune_range")
+        return [cluster for _, cluster in sorted_clusters[:cutoff_idx]]
 
-        pruned_stems = []
-        search_range = max(1, int(prune_range * original_stem_length))
-        min_length = original_stem_length - search_range
-
-        for stem, entropy_sequence in zip(stems, entropies):
-
-            # Look for entropy peak in the final search_range tokens
-            search_start = min_length
-            search_entropies = entropy_sequence[search_start:]
-
-            if not search_entropies or len(search_entropies) <= 1:
-                # No search range, keep full stem
-                pruned_stems.append(stem)
-                continue
-
-            # TODO test using a moving average of entropy to filter out noise
-            # Find largest entropy jump in the search range
-            entropy_diffs = np.diff(search_entropies)
-            max_jump_idx_in_range = np.argmax(entropy_diffs)
-
-            # Prune stem before largest entropy jump in range
-            cut_idx = search_start + max_jump_idx_in_range + 1
-            pruned_stem = stem[:cut_idx]
-            pruned_stems.append(pruned_stem)
-
-        return pruned_stems
-
-    def _print_stems(self, stem_texts: List[str], branch_node: TreeNode, original_prompt: str):
-        """Print stems for inspection."""
-        for i, stem_text in enumerate(stem_texts):
-            print(f"{i+1:3d}: {repr(stem_text)}")
+    def _filter_noise_clusters(self, cluster_list: List[Cluster]) -> List[Cluster]:
+        return [cluster for cluster in cluster_list if cluster.label != -1]
 
     def full_analysis(self, prompt: str, **kwargs) -> AnalysisReport:
-        root = self.explore_topology(prompt, **kwargs)
+        root = self.generate_tree(prompt, **kwargs)
         stats = TreeOperations.get_statistics(root)
         paths = TreeOperations.get_all_paths(root, min_depth=5)
 

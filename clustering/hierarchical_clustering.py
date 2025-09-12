@@ -1,34 +1,36 @@
-from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
 import numpy as np
+from typing import List
 from config.config import get_config
-from typing import List, Any
 from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.spatial.distance import pdist
-from sklearn.metrics.pairwise import cosine_distances
+from scipy.spatial.distance import pdist, cosine
+from clustering.cluster_analyzer import ClusterAnalyzer, Cluster
+from utilities.stem import StemPack
 
 
+# TODO: Refactor - too much responsibility
 class HierarchicalAnalyzer(ClusterAnalyzer):
-    """Hierarchical clustering analyzer."""
+    """Hierarchical clustering analyzer with adaptive distance threshold."""
 
     def __init__(self):
-        config = get_config()
-        self.min_sample_ratio = config.getfloat("clustering", "min_sample_ratio")
-        self.linkage_criterion = config.get("hi-clustering", "linkage_criterion")
-        self.cut_distance = config.getfloat("hi-clustering", "cut_distance")
-        self.force_cluster = config.getboolean("hi-clustering", "force_cluster")
+        self.config = get_config()
+        self.min_sample_ratio = self.config.getfloat("clustering", "min_sample_ratio")
+        self.cluster_top_p = self.config.getfloat("clustering", "cluster_top_p")
+        self.linkage_criterion = self.config.get("clustering", "linkage_criterion")
+        self.cut_distance = self.config.getfloat("clustering", "cut_distance")
+        self.force_cluster = self.config.getboolean("clustering", "force_cluster")
 
-    def analyze_clusters(self, embeddings: np.ndarray) -> ClusteringResult:
-        """Cluster embeddings using hierarchical clustering."""
-        if len(embeddings) < 2:
-            return ClusteringResult([], 0, False, embeddings)
+    def analyze_clusters(self, stem_pack: StemPack) -> List[Cluster]:
 
-        print(f"\n--- Hierarchical Clustering Analysis (n={len(embeddings)}) ---")
+        """Cluster delta embeddings and return list of Cluster objects."""
+        print(f"\n--- Hierarchical Clustering Analysis (n={len(stem_pack.texts)}) ---")
 
         # Build dendrogram
-        distances = pdist(embeddings, metric='cosine')
+        metric = 'cosine' if self.config.normalize_post_delta else 'euclidean'
+        distances = pdist(stem_pack.delta_embeddings, metric=metric)  # type: ignore
         linkage_matrix = linkage(distances, method=self.linkage_criterion)
 
         # Cut dendrogram at selected distance
+        # TODO: play with 'inconsistent' criterion
         labels = fcluster(linkage_matrix, self.cut_distance, criterion='distance')
         labels = labels - 1  # Convert to 0-based indexing
 
@@ -36,88 +38,80 @@ class HierarchicalAnalyzer(ClusterAnalyzer):
         print(f"Initial clusters after cut: {initial_clusters}")
 
         # Filter out small clusters (noise)
-        filtered_labels = self._filter_small_clusters(labels)
+        filtered_labels = self._filter_clusters_top_p(labels)
 
-        # Calculate final statistics
-        valid_clusters = set(filtered_labels[filtered_labels >= 0])
-        num_clusters = len(valid_clusters)
+        # Build Cluster objects from filtered results
+        clusters = self._build_cluster_objects(filtered_labels, stem_pack)
+
+        valid_clusters = len(clusters)
         noise_points = np.sum(filtered_labels == -1)
-        has_branching = num_clusters >= 2
+        
+        print(f"Final result: {valid_clusters} clusters, {noise_points} noise points")
+        print(f"Cluster sizes: {[cluster.size for cluster in clusters]}")
 
-        print(f"Final result: {num_clusters} clusters, {noise_points} noise points")
-        print(f"Cluster sizes: {[np.sum(filtered_labels == label) for label in sorted(valid_clusters)]}")
-        print(f"Has branching: {has_branching}")
+        return clusters
 
-        return ClusteringResult(
-            labels=filtered_labels.tolist(),
-            num_clusters=num_clusters,
-            has_branching=has_branching,
-            embeddings=embeddings
-        )
+    def _build_cluster_objects(self, labels: np.ndarray, stem_pack: StemPack) -> List[Cluster]:
+        """Group data by cluster labels and build Cluster objects."""
+        clusters = []
 
-    def _filter_small_clusters(self, labels: np.ndarray) -> np.ndarray:
-        """Filter out clusters smaller than min_sample_ratio, marking them as noise (-1)."""
         unique_labels = np.unique(labels)
-        min_samples = max(2, int(self.min_sample_ratio * len(labels)))
 
-        print(f"Filtering clusters: minimum {min_samples} samples per cluster (ratio={self.min_sample_ratio})")
+        for label in sorted(unique_labels):
+            cluster_mask = np.equal(labels, label)
+            cluster_indices = np.where(cluster_mask)[0]
 
-        # Identify valid clusters by size
-        valid_clusters = []
-        cluster_info = {}
+            cluster = Cluster(
+                label=label,
+                cluster_mask=cluster_mask,
+                stem_pack=stem_pack,
+                size=len(cluster_indices)
+            )
+            clusters.append(cluster)
 
-        for label in unique_labels:
-            cluster_size = np.sum(labels == label)
-            cluster_info[label] = cluster_size
+        return clusters
 
-            if cluster_size >= min_samples:
-                valid_clusters.append(label)
+    def _filter_clusters_top_p(self, labels: np.ndarray) -> np.ndarray:
+        """Keep largest clusters until target coverage is reached, subject to minimum size threshold."""
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        total_samples = len(labels)
+        min_samples = max(2, int(self.min_sample_ratio * total_samples))
 
-        print(f"All cluster sizes: {cluster_info}")
-        print(f"Valid clusters: {valid_clusters}")
+        # Sort clusters by size descending
+        sorted_idx = np.argsort(counts)[::-1]
+        sorted_counts = counts[sorted_idx]
+        sorted_labels = unique_labels[sorted_idx]
 
-        if not valid_clusters and self.force_cluster:
-            # TODO flag forced clusters in results somehow
-            print('No valid clusters found, returning largest cluster')
-            # Find the largest cluster
-            largest_label = max(cluster_info.items(), key=lambda x: x[1])[0]
-            valid_clusters = [largest_label]
+        # Filter by minimum size threshold
+        size_mask = sorted_counts >= min_samples
+        if not size_mask.any() and self.force_cluster:
+            # Force include largest cluster if none meet threshold
+            size_mask[0] = True
 
-        # Create new labels: valid clusters get new sequential IDs, small ones become noise (-1)
+        valid_counts = sorted_counts[size_mask]
+        valid_labels = sorted_labels[size_mask]
+
+        # Find clusters needed to reach target coverage
+        cumulative_samples = np.cumsum(valid_counts)
+        coverage_threshold = self.cluster_top_p * total_samples
+        keep_mask = (cumulative_samples <= coverage_threshold) | (np.arange(len(cumulative_samples)) == 0)
+
+        # Always keep at least one cluster if any are valid
+        if keep_mask.any():
+            # Include the first cluster that pushes us over threshold
+            first_over_idx = np.searchsorted(cumulative_samples, coverage_threshold, side='right')
+            if first_over_idx < len(keep_mask):
+                keep_mask[first_over_idx] = True
+
+        final_labels = valid_labels[keep_mask]
+        final_coverage = cumulative_samples[keep_mask][-1] if keep_mask.any() else 0
+
+        # label remapping
         filtered_labels = np.full(len(labels), -1, dtype=int)
+        for new_id, old_label in enumerate(final_labels):
+            filtered_labels[labels == old_label] = new_id
 
-        for new_id, old_label in enumerate(valid_clusters):
-            mask = labels == old_label
-            filtered_labels[mask] = new_id
-
-        filtered_points = np.sum(filtered_labels >= 0)
-        noise_points = np.sum(filtered_labels == -1)
-
-        print(f"After filtering: {len(valid_clusters)} valid clusters ({filtered_points} points), {noise_points} noise points")
+        coverage = final_coverage / total_samples
+        print(f"Kept {len(final_labels)} clusters covering {coverage:.1%} of samples")
 
         return filtered_labels
-
-    def get_cluster_representatives(self, items: List[Any],
-                                 clustering_result: ClusteringResult) -> List[Any]:
-        """Get representative items using centroid proximity."""
-        embeddings = clustering_result.embeddings
-        labels = clustering_result.labels
-
-        if not items or embeddings is None:
-            return []
-
-        # Only get representatives for valid clusters (not noise points)
-        valid_labels = [label for label in set(labels) if label >= 0]
-        representatives = []
-
-        for label in sorted(valid_labels):
-            cluster_indices = [i for i, l in enumerate(labels) if l == label]
-            cluster_embeddings = embeddings[cluster_indices]
-
-            # Find item closest to cluster centroid
-            centroid = np.mean(cluster_embeddings, axis=0)
-            similarities = np.dot(cluster_embeddings, centroid)
-            closest_idx = cluster_indices[np.argmax(similarities)]
-            representatives.append(items[closest_idx])
-
-        return representatives

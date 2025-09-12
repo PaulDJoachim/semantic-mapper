@@ -6,9 +6,9 @@ from visualization.visualization import TreeVisualizer, TreePrinter
 def main():
     config = get_config()
 
-    inference_model = config.get('model', 'model_name', 'mock')
-    embedding_model = config.get('embeddings', 'model_name', 'mock')
-    cluster_type = config.get('clustering', 'cluster_type', 'mock')
+    inference_model = config.get('model', 'model_name')
+    embedding_model = config.get('embeddings', 'model_name')
+    cluster_type = config.get('clustering', 'cluster_type')
 
     generator = create_generator(inference_model=inference_model,
                                  embedding_model=embedding_model,
@@ -21,7 +21,16 @@ def main():
     printer = TreePrinter()
 
     test_prompts = [
-        "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is"]
+        # "The primary purpose of education is to",
+        # "Blue whales are the largest animals on Earth, but did you know",
+        # "If all A are B, and all B are C,",
+        # "Remember that guy we met yesterday? I just found out",
+        # "The frequency of a word is inversely proportional to",
+        # "Janet my dear, I have a terrible secret I must confess - something so profound and horrific, that I'm afraid it may shatter our love like those cool pumpkin-slinging trebuchets do to the various gourds they launch. There's no easy way to say this... Janet, the truth is",
+        # "Peanut butter cookies are a delicious autumn treat! Here's a recipe that you can try at home. Start by",
+        # "In the question of individual autonomy versus collective welfare, I'd argue the more ethical position is",
+        "Out of all the animals that have ever existed, my favorite one is undoubtedly the",
+    ]
 
     for prompt in test_prompts:
         print(f"\n{'='*70}")
@@ -29,7 +38,7 @@ def main():
         print(f"{'='*70}")
 
         # Generate analysis report
-        report = generator.full_analysis(prompt, print_stems=False)
+        report = generator.full_analysis(prompt)
 
         # Save and visualize
         json_path = report.save_json(analysis_output_dir)
