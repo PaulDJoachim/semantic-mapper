@@ -17,9 +17,9 @@ This project was created as a way to learn more about the inner workings of lang
 This is very much a work in progress. The basic pipeline functions and will:
 
 - Recursively generate multiple continuation "stems" and nodes from an initial prompt
-- Prune stems based on abrupt jumps in token entropy
-- Create semantic embeddings of stems using a sentence transformer model
-- Group stem embeddings using a clustering algorithm (DBSCAN or Hierarchical currently)
+- Prune stems based on configurable cumulative token entropy budget
+- Create differential semantic "delta" embeddings of stems using a sentence transformer model
+- Group stem embeddings using a Hierarchical clustering algorithm
 - Select cluster representatives for continuation or branching
 - Build an interactive html visualization showing where semantic divergence is detected
 - Display the stem clustering of each node as a 3D PCA projection, along with the text of
