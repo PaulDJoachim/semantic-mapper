@@ -1,52 +1,36 @@
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Any, NamedTuple, Dict
+from abc import ABC, abstractmethod
+from typing import List, Any, Optional
 import numpy as np
+from utilities.stem import StemPack
 
 
 @dataclass
-class ClusteringResult:
-    """Clustering analysis results."""
-    labels: List[int]
-    representatives: Dict[int, List[int]]
-    num_clusters: int
-    has_branching: bool
-    embeddings: np.ndarray
+class Cluster:
+    """Cluster object containing cluster label, mask for cluster member positions, and reference to stem pack of cluster."""
+    label: int
+    cluster_mask: np.ndarray  # mask for cluster member positions
+    stem_pack: StemPack  # reference to stem pack of cluster
+    size: int  # Number of token sequences in cluster
 
-    def update_cluster_representatives(self, items: List[Any]):
-        """Find representative items using centroid proximity."""
-        embeddings = self.embeddings
-        labels = np.array(self.labels)
+    # TODO Representative object? Move these to TreeNode?
+    representative_sequence: Optional[List[int]] = None  # tokens
+    representative_semantic_embedding: np.ndarray = None
+    representative_trajectory_embedding: np.ndarray = None  # Assigned to TreeNode
+    representative_entropy: Optional[float] = None
 
-        # Get unique valid cluster labels (excluding noise points)
-        unique_labels = np.unique(labels)
-        valid_labels = unique_labels[unique_labels >= 0]
-
-        representatives = {}
-
-        for label in valid_labels:
-            cluster_mask = labels == label
-            cluster_indices = np.where(cluster_mask)[0]
-            cluster_embeddings = embeddings[cluster_mask]
-
-            # Compute centroid and find closest point
-            centroid = cluster_embeddings.mean(axis=0)
-
-            # Use dot product for cosine similarity
-            similarities = np.dot(cluster_embeddings, centroid)
-            closest_local_idx = np.argmax(similarities)
-            closest_global_idx = cluster_indices[closest_local_idx]
-
-            representatives[label] = items[closest_global_idx]
-
-        self.representatives = representatives
+    def get_cluster_attr(self, attr_name: str):
+        return self.stem_pack.get_cluster_attr(attr_name, self.cluster_mask)
 
 
 class ClusterAnalyzer(ABC):
     """Abstract interface for clustering analysis."""
 
     @abstractmethod
-    def analyze_clusters(self, embeddings: np.ndarray) -> ClusteringResult:
+    def analyze_clusters(self, embeddings: np.ndarray,
+                         delta_embeddings: np.ndarray,
+                         token_sequences: np.ndarray,
+                         token_mask: np.ndarray,
+                         text_sequences: List[str]) -> List[Cluster]:
         """Cluster embeddings and determine branching."""
         pass
-

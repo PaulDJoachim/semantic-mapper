@@ -1,46 +1,37 @@
-from clustering.cluster_analyzer import ClusterAnalyzer, ClusteringResult
 import numpy as np
+from typing import List
 from config.config import get_config
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import pdist, cosine
+from clustering.cluster_analyzer import ClusterAnalyzer, Cluster
+from utilities.stem import StemPack
 
 
+# TODO: Refactor - too much responsibility
 class HierarchicalAnalyzer(ClusterAnalyzer):
     """Hierarchical clustering analyzer with adaptive distance threshold."""
 
     def __init__(self):
-        config = get_config()
-        self.min_sample_ratio = config.getfloat("clustering", "min_sample_ratio")
-        self.cluster_top_p = config.getfloat("hi-clustering", "cluster_top_p")
-        self.linkage_criterion = config.get("hi-clustering", "linkage_criterion")
-        self.cut_distance = config.getfloat("hi-clustering", "cut_distance")
-        self.force_cluster = config.getboolean("hi-clustering", "force_cluster")
+        self.config = get_config()
+        self.min_sample_ratio = self.config.getfloat("clustering", "min_sample_ratio")
+        self.cluster_top_p = self.config.getfloat("clustering", "cluster_top_p")
+        self.linkage_criterion = self.config.get("clustering", "linkage_criterion")
+        self.cut_distance = self.config.getfloat("clustering", "cut_distance")
+        self.force_cluster = self.config.getboolean("clustering", "force_cluster")
 
-        # New adaptive distance parameters
-        self.use_adaptive_distance = config.getboolean("hi-clustering", "use_adaptive_distance", fallback=False)
-        self.variance_scaling_factor = config.getfloat("hi-clustering", "variance_scaling_factor", fallback=1.0)
+    def analyze_clusters(self, stem_pack: StemPack) -> List[Cluster]:
 
-    def analyze_clusters(self, embeddings: np.ndarray) -> ClusteringResult:
-        """Cluster embeddings using hierarchical clustering."""
-        if len(embeddings) < 2:
-            return ClusteringResult([], 0, False, embeddings)
-
-        print(f"\n--- Hierarchical Clustering Analysis (n={len(embeddings)}) ---")
-
-        # Calculate adaptive distance threshold if enabled
-        if self.use_adaptive_distance:
-            cut_distance = self._calculate_adaptive_distance(embeddings)
-            print(f"Adaptive cut distance: {cut_distance:.3f} (base: {self.cut_distance:.3f})")
-        else:
-            cut_distance = self.cut_distance
-            print(f"Using fixed cut distance: {cut_distance:.3f}")
+        """Cluster delta embeddings and return list of Cluster objects."""
+        print(f"\n--- Hierarchical Clustering Analysis (n={len(stem_pack.texts)}) ---")
 
         # Build dendrogram
-        distances = pdist(embeddings, metric='cosine')
+        metric = 'cosine' if self.config.normalize_post_delta else 'euclidean'
+        distances = pdist(stem_pack.delta_embeddings, metric=metric)  # type: ignore
         linkage_matrix = linkage(distances, method=self.linkage_criterion)
 
         # Cut dendrogram at selected distance
-        labels = fcluster(linkage_matrix, cut_distance, criterion='distance')
+        # TODO: play with 'inconsistent' criterion
+        labels = fcluster(linkage_matrix, self.cut_distance, criterion='distance')
         labels = labels - 1  # Convert to 0-based indexing
 
         initial_clusters = len(set(labels))
@@ -49,48 +40,36 @@ class HierarchicalAnalyzer(ClusterAnalyzer):
         # Filter out small clusters (noise)
         filtered_labels = self._filter_clusters_top_p(labels)
 
-        # Calculate final statistics
-        valid_clusters = set(filtered_labels[filtered_labels >= 0])
-        num_clusters = len(valid_clusters)
+        # Build Cluster objects from filtered results
+        clusters = self._build_cluster_objects(filtered_labels, stem_pack)
+
+        valid_clusters = len(clusters)
         noise_points = np.sum(filtered_labels == -1)
-        has_branching = num_clusters >= 2
+        
+        print(f"Final result: {valid_clusters} clusters, {noise_points} noise points")
+        print(f"Cluster sizes: {[cluster.size for cluster in clusters]}")
 
-        print(f"Final result: {num_clusters} clusters, {noise_points} noise points")
-        print(f"Cluster sizes: {[int(np.sum(filtered_labels == label)) for label in sorted(valid_clusters)]}")
-        print(f"Has branching: {has_branching}")
+        return clusters
 
-        return ClusteringResult(
-            labels=filtered_labels.tolist(),
-            representatives={},
-            num_clusters=num_clusters,
-            has_branching=has_branching,
-            embeddings=embeddings
-        )
+    def _build_cluster_objects(self, labels: np.ndarray, stem_pack: StemPack) -> List[Cluster]:
+        """Group data by cluster labels and build Cluster objects."""
+        clusters = []
 
-    def _calculate_adaptive_distance(self, embeddings: np.ndarray) -> float:
-        """Calculate adaptive distance threshold based on dataset variance."""
-        # Calculate centroid of all embeddings
-        centroid = np.mean(embeddings, axis=0)
+        unique_labels = np.unique(labels)
 
-        # Calculate distance from each embedding to centroid
-        distances_to_centroid = [cosine(emb, centroid) for emb in embeddings]
+        for label in sorted(unique_labels):
+            cluster_mask = np.equal(labels, label)
+            cluster_indices = np.where(cluster_mask)[0]
 
-        # Use standard deviation as variance measure
-        # TODO: Print this to the UI somewhere
-        variance_measure = np.std(distances_to_centroid)
+            cluster = Cluster(
+                label=label,
+                cluster_mask=cluster_mask,
+                stem_pack=stem_pack,
+                size=len(cluster_indices)
+            )
+            clusters.append(cluster)
 
-        # # Scale base distance by variance
-        # variance_scaling = 1 + self.variance_scaling_factor * variance_measure
-
-        # Testing non-linear scaling
-        variance_scaling = 1 + self.variance_scaling_factor * variance_measure ** 2
-
-        adaptive_distance = self.cut_distance * variance_scaling
-
-        print(f"Dataset variance (std of centroid distances): {variance_measure:.3f}")
-        print(f"Variance scaling: {variance_scaling:.3f}")
-
-        return adaptive_distance
+        return clusters
 
     def _filter_clusters_top_p(self, labels: np.ndarray) -> np.ndarray:
         """Keep largest clusters until target coverage is reached, subject to minimum size threshold."""
