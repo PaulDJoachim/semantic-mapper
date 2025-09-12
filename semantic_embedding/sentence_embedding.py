@@ -13,33 +13,36 @@ class SentenceEmbeddingProvider(EmbeddingProvider):
         config = get_config()
         device = config.get("model", "device")
         self.model_name = model_name
-        self.normalize = config.getboolean("embeddings", "normalize")
         self.batch_size = config.getint("embeddings", "batch_size")
         self.custom_pooling = config.get("embeddings", "custom_pooling")
 
         # Build transformer + pooling
         embedding_model = models.Transformer(model_name)
         embedding_dimension = embedding_model.get_word_embedding_dimension()
-        pooling_modes = {"max": "max", "mean": "mean", "lasttoken": "lasttoken"}
+        pooling_modes = {"max": "max", "mean": "mean", "weighted": "weightedmean", "lasttoken": "lasttoken"}
 
         if self.custom_pooling not in pooling_modes:
             raise ValueError(
                 f"Unknown pooling: {self.custom_pooling}. Valid options: {list(pooling_modes.keys())}")
 
-        pooling_model = models.Pooling(embedding_dimension, pooling_mode=pooling_modes[self.custom_pooling])
+        pooling_model = models.Pooling(embedding_dimension,
+                                       pooling_mode=pooling_modes[self.custom_pooling])
 
         self.model = SentenceTransformer(modules=[embedding_model, pooling_model], device=device)
         self.tokenizer = self.model.tokenizer
 
-    def get_embeddings(self, texts: List[str]) -> np.ndarray:
+    def get_embeddings(self, texts: np.ndarray, normalize: bool = False) -> np.ndarray:
         """Generate embeddings using sentence transformers with configured pooling."""
+        # Ensure batch size is not larger than the actual number of texts
+        length = len(texts)
+        batch_size = length if length < self.batch_size else self.batch_size
 
         embeddings = self.model.encode(
             texts,
-            batch_size=self.batch_size,
+            batch_size=batch_size,
             convert_to_numpy=True,
             show_progress_bar=False,
-            normalize_embeddings=self.normalize
+            normalize_embeddings=normalize,
         )
 
         return embeddings
